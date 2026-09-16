@@ -1,0 +1,1918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudServe AI Support — Low-Level Architecture & LangGraph Simulation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-main: #090d16;
+      --bg-card: rgba(22, 27, 34, 0.85);
+      --bg-card-hover: rgba(30, 38, 49, 0.95);
+      --bg-code: #0d1117;
+      --border-subtle: #30363d;
+      --border-focus: #58a6ff;
+      --text-main: #f0f6fc;
+      --text-muted: #8b949e;
+      --accent-blue: #58a6ff;
+      --accent-green: #3fb950;
+      --accent-amber: #d29922;
+      --accent-red: #f85149;
+      --accent-purple: #bc8cff;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      padding: 0;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Top Navigation Bar */
+    header {
+      background: rgba(13, 17, 23, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-subtle);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-badge {
+      background: linear-gradient(135deg, #1f6feb, #8957e5);
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .brand-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    /* Navigation Tabs */
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      background: #161b22;
+      padding: 0.25rem;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.5rem 1.1rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .tab-btn.active {
+      color: #fff;
+      background: #1f6feb;
+      box-shadow: 0 2px 8px rgba(31, 111, 235, 0.4);
+    }
+
+    /* Main Container */
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    .tab-content {
+      display: none;
+      animation: fadeIn 0.3s ease forwards;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cards & Containers */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 0.75rem;
+    }
+
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: #fff;
+    }
+
+    .card-subtitle {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-top: 0.25rem;
+    }
+
+    /* Component Grid */
+    .comp-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.25rem;
+      margin-top: 1rem;
+    }
+
+    .comp-box {
+      background: #161b22;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1.25rem;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .comp-box:hover {
+      border-color: var(--accent-blue);
+      transform: translateY(-2px);
+    }
+
+    .comp-badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+
+    .badge-ingest { background: #1f6feb22; color: #58a6ff; border: 1px solid #1f6feb66; }
+    .badge-retrieve { background: #8957e522; color: #bc8cff; border: 1px solid #8957e566; }
+    .badge-classify { background: #d2992222; color: #e3b341; border: 1px solid #d2992266; }
+    .badge-route { background: #da363322; color: #f85149; border: 1px solid #da363366; }
+    .badge-generate { background: #23863622; color: #3fb950; border: 1px solid #23863666; }
+    .badge-guardrails { background: #db61a222; color: #f778ba; border: 1px solid #db61a266; }
+    .badge-log { background: #388bfd22; color: #79c0ff; border: 1px solid #388bfd66; }
+
+    .comp-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.4rem;
+    }
+
+    .comp-file {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--accent-blue);
+      margin-bottom: 0.75rem;
+    }
+
+    .comp-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Table Styles */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.88rem;
+    }
+
+    th {
+      background: #161b22;
+      color: var(--text-muted);
+      text-align: left;
+      padding: 0.75rem 1rem;
+      border-bottom: 2px solid var(--border-subtle);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+    }
+
+    td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: top;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .var-badge {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--accent-blue);
+      background: rgba(88, 166, 255, 0.1);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+    }
+
+    .node-pill {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      margin: 0.15rem 0.1rem;
+    }
+
+    .pill-retrieve { background: #bc8cff22; color: #bc8cff; border: 1px solid #bc8cff44; }
+    .pill-classify { background: #e3b34122; color: #e3b341; border: 1px solid #e3b34144; }
+    .pill-route { background: #f8514922; color: #f85149; border: 1px solid #f8514944; }
+    .pill-generate { background: #3fb95022; color: #3fb950; border: 1px solid #3fb95044; }
+    .pill-guardrails { background: #f778ba22; color: #f778ba; border: 1px solid #f778ba44; }
+    .pill-log { background: #58a6ff22; color: #58a6ff; border: 1px solid #58a6ff44; }
+
+    /* Code Blocks */
+    pre, code {
+      font-family: var(--font-mono);
+    }
+
+    pre {
+      background: var(--bg-code);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      color: #e6edf3;
+      line-height: 1.45;
+    }
+
+    /* Simulator Styles */
+    .sim-scenarios {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    .scenario-btn {
+      background: #161b22;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .scenario-btn:hover {
+      border-color: var(--accent-blue);
+      background: #1c2128;
+    }
+
+    .scenario-btn.active {
+      background: #1f6feb;
+      border-color: #58a6ff;
+      color: #fff;
+      box-shadow: 0 2px 10px rgba(31, 111, 235, 0.4);
+    }
+
+    .sim-pipeline {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      overflow-x: auto;
+      padding: 1rem 0.5rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .sim-node-step {
+      background: #161b22;
+      border: 2px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 0.75rem 1.2rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      min-width: 140px;
+      text-align: center;
+      position: relative;
+    }
+
+    .sim-node-step:hover {
+      border-color: var(--accent-blue);
+      transform: translateY(-2px);
+    }
+
+    .sim-node-step.active {
+      border-color: #58a6ff;
+      background: rgba(31, 111, 235, 0.15);
+      box-shadow: 0 0 12px rgba(88, 166, 255, 0.3);
+    }
+
+    .sim-node-step.skipped {
+      opacity: 0.4;
+      border-style: dashed;
+    }
+
+    .sim-node-step .step-title {
+      font-weight: 700;
+      font-size: 0.9rem;
+      color: #fff;
+    }
+
+    .sim-node-step .step-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.2rem;
+    }
+
+    .pipeline-arrow {
+      color: var(--border-subtle);
+      font-size: 1.2rem;
+      font-weight: bold;
+    }
+
+    .sim-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .sim-pane {
+      background: #0d1117;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+
+    .sim-pane-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .delta-tag {
+      background: #238636;
+      color: #fff;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-weight: 700;
+    }
+
+    .banner-escalation {
+      background: rgba(248, 81, 73, 0.15);
+      border: 1px solid #f85149;
+      color: #f85149;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .banner-auto {
+      background: rgba(63, 185, 80, 0.15);
+      border: 1px solid #3fb950;
+      color: #3fb950;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .graph-node-group {
+      transition: transform 0.2s ease, filter 0.2s ease;
+    }
+
+    .graph-node-group:hover {
+      filter: brightness(1.15) drop-shadow(0 4px 12px rgba(88, 166, 255, 0.3));
+    }
+
+    /* Contract KPI Benchmark Styles */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+
+    .kpi-metric-card {
+      background: #161b22;
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.25s ease;
+    }
+
+    .kpi-metric-card.pass {
+      border-top: 3px solid #3fb950;
+    }
+
+    .kpi-metric-card.fail {
+      border-top: 3px solid #f85149;
+    }
+
+    .kpi-metric-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    .kpi-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.5rem;
+    }
+
+    .kpi-name {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #f0f6fc;
+    }
+
+    .kpi-id-tag {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-muted);
+    }
+
+    .kpi-val-row {
+      display: flex;
+      align-items: baseline;
+      gap: 0.75rem;
+      margin: 0.5rem 0;
+    }
+
+    .kpi-actual-val {
+      font-size: 1.75rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .kpi-actual-val.pass { color: #3fb950; }
+    .kpi-actual-val.fail { color: #f85149; }
+
+    .kpi-target-label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .kpi-badge-pass {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: rgba(63, 185, 80, 0.12);
+      border: 1px solid rgba(63, 185, 80, 0.4);
+      color: #3fb950;
+      font-weight: 700;
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      letter-spacing: 0.02em;
+    }
+
+    .kpi-badge-fail {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: rgba(248, 81, 73, 0.12);
+      border: 1px solid rgba(248, 81, 73, 0.4);
+      color: #f85149;
+      font-weight: 700;
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      letter-spacing: 0.02em;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .dot-pass { background-color: #3fb950; box-shadow: 0 0 6px #3fb950; }
+    .dot-fail { background-color: #f85149; box-shadow: 0 0 6px #f85149; }
+
+    .kpi-progress-bg {
+      background: #21262d;
+      border-radius: 9999px;
+      height: 6px;
+      width: 100%;
+      overflow: hidden;
+      margin-top: 0.5rem;
+    }
+
+    .kpi-progress-bar-pass {
+      background: linear-gradient(90deg, #238636, #3fb950);
+      height: 100%;
+      border-radius: 9999px;
+    }
+
+    .kpi-progress-bar-fail {
+      background: linear-gradient(90deg, #da3633, #f85149);
+      height: 100%;
+      border-radius: 9999px;
+    }
+
+    .delta-pass {
+      color: #3fb950;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .delta-fail {
+      color: #f85149;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header & Navigation -->
+  <header>
+    <div class="brand">
+      <span class="brand-badge">Architecture Blueprint</span>
+      <h1 class="brand-title">CloudServe Support Triage & LangGraph Blueprint</h1>
+    </div>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('arch')">
+        <span>🏛️ System Architecture</span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('langgraph')">
+        <span>⚡ LangGraph State & Variables</span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('simulator')">
+        <span>🧪 Interactive Node Simulator</span>
+      </button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+      <a href="../evaluation/results/scorecard.html" style="background: rgba(31, 111, 235, 0.15); border: 1px solid #1f6feb; color: #58a6ff; padding: 0.45rem 0.9rem; font-size: 0.82rem; font-weight: 600; border-radius: 6px; text-decoration: none; display: flex; align-items: center; gap: 0.4rem; transition: all 0.2s ease;">
+        <span>📊</span> Open Contract KPI Scorecard ↗
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <!-- TAB 1: SYSTEM ARCHITECTURE -->
+    <section id="tab-arch" class="tab-content active">
+      <!-- VISUAL END-TO-END SYSTEM ARCHITECTURE DIAGRAM -->
+      <div class="card" style="margin-bottom: 2rem;">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">🌐 End-to-End System Architecture &amp; Data Lifecycle</h2>
+            <p class="card-subtitle">Complete architectural topology: 4-channel ingestion, normalization boundary, LangGraph intelligence loop, dual resolution lanes, and enterprise governance audit store.</p>
+          </div>
+        </div>
+
+        <div style="width: 100%; overflow-x: auto; padding: 1rem 0;">
+          <svg viewBox="0 0 1360 960" style="width: 100%; max-width: 1360px; display: block; margin: 0 auto; font-family: 'Inter', -apple-system, sans-serif;">
+            <defs>
+              <marker id="sys-arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#58a6ff" />
+              </marker>
+              <marker id="sys-arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#3fb950" />
+              </marker>
+              <marker id="sys-arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#f85149" />
+              </marker>
+              <marker id="sys-arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#bc8cff" />
+              </marker>
+              <marker id="sys-arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#d29922" />
+              </marker>
+              <filter id="sys-glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            <!-- ================= TOP: LIFECYCLE PROGRESS TRACKER ================= -->
+            <rect x="20" y="10" width="1320" height="38" rx="8" fill="#0d1117" stroke="#30363d" stroke-width="1.2" />
+            <text x="35" y="34" fill="#8b949e" font-size="11" font-weight="700">END-TO-END LIFECYCLE:</text>
+            <rect x="180" y="18" width="165" height="22" rx="4" fill="rgba(88, 166, 255, 0.15)" stroke="#388bfd" stroke-width="1" />
+            <text x="262" y="33" fill="#58a6ff" font-size="10" font-weight="600" text-anchor="middle">① 4 Customer Channels</text>
+            <text x="355" y="34" fill="#8b949e" font-size="11">➔</text>
+            <rect x="375" y="18" width="165" height="22" rx="4" fill="rgba(88, 166, 255, 0.15)" stroke="#388bfd" stroke-width="1" />
+            <text x="457" y="33" fill="#58a6ff" font-size="10" font-weight="600" text-anchor="middle">② Ingestion Gateway</text>
+            <text x="550" y="34" fill="#8b949e" font-size="11">➔</text>
+            <rect x="570" y="18" width="185" height="22" rx="4" fill="rgba(188, 140, 255, 0.15)" stroke="#bc8cff" stroke-width="1" />
+            <text x="662" y="33" fill="#bc8cff" font-size="10" font-weight="600" text-anchor="middle">③ LangGraph Intelligence Core</text>
+            <text x="765" y="34" fill="#8b949e" font-size="11">➔</text>
+            <rect x="785" y="18" width="160" height="22" rx="4" fill="rgba(210, 153, 34, 0.15)" stroke="#d29922" stroke-width="1" />
+            <text x="865" y="33" fill="#d29922" font-size="10" font-weight="600" text-anchor="middle">④ Deterministic Policy Router</text>
+            <text x="955" y="34" fill="#8b949e" font-size="11">➔</text>
+            <rect x="975" y="18" width="175" height="22" rx="4" fill="rgba(63, 185, 80, 0.15)" stroke="#3fb950" stroke-width="1" />
+            <text x="1062" y="33" fill="#3fb950" font-size="10" font-weight="600" text-anchor="middle">⑤ Dual Resolution Execution</text>
+            <text x="1160" y="34" fill="#8b949e" font-size="11">➔</text>
+            <rect x="1180" y="18" width="150" height="22" rx="4" fill="rgba(188, 140, 255, 0.15)" stroke="#bc8cff" stroke-width="1" />
+            <text x="1255" y="33" fill="#bc8cff" font-size="10" font-weight="600" text-anchor="middle">⑥ 100% Audit Logging</text>
+
+            <!-- ================= LAYER 1: CUSTOMER INGRESS (4 SOURCES) ================= -->
+            <rect x="20" y="60" width="225" height="590" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1.5" />
+            <rect x="20" y="60" width="225" height="32" rx="12" fill="rgba(88, 166, 255, 0.12)" />
+            <text x="132" y="81" fill="#58a6ff" font-size="11.5" font-weight="700" text-anchor="middle" letter-spacing="0.5">1. CUSTOMER INGRESS (4 SOURCES)</text>
+
+            <!-- Customer Persona -->
+            <g class="graph-node-group">
+              <rect x="32" y="100" width="200" height="68" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.2" />
+              <text x="44" y="120" fill="#f0f6fc" font-size="11.5" font-weight="700">🧑‍💻 Customer / DevOps Engineer</text>
+              <text x="44" y="138" fill="#8b949e" font-size="10">CloudServe B2B Infrastructure Client</text>
+              <text x="44" y="154" fill="#58a6ff" font-size="9.5">Reports issue via any preferred tool</text>
+            </g>
+
+            <!-- Channel 1: Email -->
+            <g class="graph-node-group">
+              <rect x="32" y="178" width="200" height="88" rx="8" fill="#161b22" stroke="#388bfd" stroke-width="1.2" />
+              <text x="44" y="198" fill="#58a6ff" font-size="11.5" font-weight="700">✉️ Inbound Email / SMTP</text>
+              <text x="44" y="216" fill="#8b949e" font-size="10">support@cloudserve.io</text>
+              <text x="44" y="232" fill="#8b949e" font-size="9.5">• MIME multipart parser &amp; headers</text>
+              <text x="44" y="248" fill="#8b949e" font-size="9.5">• Subject line + signature stripping</text>
+            </g>
+
+            <!-- Channel 2: Live Chat -->
+            <g class="graph-node-group">
+              <rect x="32" y="276" width="200" height="88" rx="8" fill="#161b22" stroke="#3fb950" stroke-width="1.2" />
+              <text x="44" y="296" fill="#3fb950" font-size="11.5" font-weight="700">💬 In-Console Live Chat</text>
+              <text x="44" y="314" fill="#8b949e" font-size="10">WebSocket / Server-Sent Events</text>
+              <text x="44" y="330" fill="#8b949e" font-size="9.5">• Session token &amp; turn-based dialog</text>
+              <text x="44" y="346" fill="#8b949e" font-size="9.5">• Low latency interactive text stream</text>
+            </g>
+
+            <!-- Channel 3: Docs Feedback -->
+            <g class="graph-node-group">
+              <rect x="32" y="374" width="200" height="88" rx="8" fill="#161b22" stroke="#d29922" stroke-width="1.2" />
+              <text x="44" y="394" fill="#d29922" font-size="11.5" font-weight="700">📝 In-Product Docs Widget</text>
+              <text x="44" y="412" fill="#8b949e" font-size="10">REST API / docs.cloudserve.io</text>
+              <text x="44" y="428" fill="#8b949e" font-size="9.5">• Anchored to exact page URL &amp; title</text>
+              <text x="44" y="444" fill="#8b949e" font-size="9.5">• Contextual code snippet feedback</text>
+            </g>
+
+            <!-- Channel 4: Community / Slack -->
+            <g class="graph-node-group">
+              <rect x="32" y="472" width="200" height="88" rx="8" fill="#161b22" stroke="#bc8cff" stroke-width="1.2" />
+              <text x="44" y="492" fill="#bc8cff" font-size="11.5" font-weight="700">🌐 Developer Forum / Slack</text>
+              <text x="44" y="510" fill="#8b949e" font-size="10">Webhooks / community threads</text>
+              <text x="44" y="526" fill="#8b949e" font-size="9.5">• Public thread ID &amp; markdown blocks</text>
+              <text x="44" y="542" fill="#8b949e" font-size="9.5">• Stack traces &amp; configuration YAML</text>
+            </g>
+
+            <rect x="32" y="570" width="200" height="68" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+            <text x="44" y="590" fill="#f0f6fc" font-size="10.5" font-weight="600">Payload Characteristics:</text>
+            <text x="44" y="608" fill="#8b949e" font-size="9.5">Raw unstructured text + metadata</text>
+            <text x="44" y="624" fill="#58a6ff" font-size="9.5">Origin Channel tag preserved</text>
+
+            <!-- Connector Lines from 4 Channels to Gateway Ingress Bus -->
+            <line x1="232" y1="222" x2="252" y2="222" stroke="#388bfd" stroke-width="1.5" />
+            <line x1="232" y1="320" x2="252" y2="320" stroke="#3fb950" stroke-width="1.5" />
+            <line x1="232" y1="418" x2="252" y2="418" stroke="#d29922" stroke-width="1.5" />
+            <line x1="232" y1="516" x2="252" y2="516" stroke="#bc8cff" stroke-width="1.5" />
+            <!-- Ingress Bus -->
+            <line x1="252" y1="145" x2="252" y2="516" stroke="#58a6ff" stroke-width="2" stroke-dasharray="3" />
+            <line x1="252" y1="145" x2="282" y2="145" stroke="#58a6ff" stroke-width="2" marker-end="url(#sys-arrow-blue)" />
+            <rect x="248" y="133" width="30" height="15" rx="3" fill="#0d1117" stroke="#388bfd" stroke-width="1" />
+            <text x="263" y="144" fill="#58a6ff" font-size="8" font-family="'JetBrains Mono', monospace" text-anchor="middle">raw</text>
+
+            <!-- ================= LAYER 2: INGESTION GATEWAY ================= -->
+            <g class="graph-node-group">
+              <rect x="270" y="60" width="215" height="590" rx="12" fill="#0d1117" stroke="#388bfd" stroke-width="1.5" />
+              <rect x="270" y="60" width="215" height="32" rx="12" fill="rgba(88, 166, 255, 0.15)" />
+              <text x="377" y="81" fill="#58a6ff" font-size="11.5" font-weight="700" text-anchor="middle" letter-spacing="0.5">2. INGESTION GATEWAY</text>
+
+              <!-- Gateway Sub-Boxes -->
+              <rect x="282" y="100" width="190" height="88" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+              <text x="294" y="118" fill="#58a6ff" font-size="10.5" font-weight="700">🛡️ Edge Boundary / API</text>
+              <text x="294" y="134" fill="#8b949e" font-size="9">FastAPI (src/api.py)</text>
+              <text x="294" y="148" fill="#e6edf3" font-size="8.5" font-family="'JetBrains Mono', monospace">POST /tickets/ingest</text>
+              <text x="294" y="163" fill="#8b949e" font-size="9">• Rate limiting &amp; API token check</text>
+              <text x="294" y="177" fill="#8b949e" font-size="9">• Cross-Origin CORS validation</text>
+
+              <!-- Gateway Sequential Arrow 1 -> 2 -->
+              <line x1="377" y1="188" x2="377" y2="202" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#sys-arrow-blue)" />
+
+              <rect x="282" y="202" width="190" height="94" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+              <text x="294" y="220" fill="#bc8cff" font-size="10.5" font-weight="700">🔒 Pre-Triage PII Scrubber</text>
+              <text x="294" y="236" fill="#8b949e" font-size="9">• Regex &amp; credential scanner</text>
+              <text x="294" y="251" fill="#8b949e" font-size="9">• Strips API keys &amp; passwords</text>
+              <text x="294" y="266" fill="#8b949e" font-size="9">• Redacts pre-existing secrets</text>
+              <text x="294" y="282" fill="#3fb950" font-size="9">Rule: Cleanse before state init</text>
+
+              <!-- Gateway Sequential Arrow 2 -> 3 -->
+              <line x1="377" y1="296" x2="377" y2="308" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#sys-arrow-purple)" />
+
+              <rect x="282" y="308" width="190" height="94" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+              <text x="294" y="326" fill="#d29922" font-size="10.5" font-weight="700">🏢 Metadata &amp; SLA Enricher</text>
+              <text x="294" y="342" fill="#8b949e" font-size="9">• Customer Tier Lookup:</text>
+              <text x="304" y="357" fill="#58a6ff" font-size="8.5" font-family="'JetBrains Mono', monospace">free | starter | pro | enterprise</text>
+              <text x="294" y="373" fill="#8b949e" font-size="9">• SLA Target &amp; Region tagging</text>
+              <text x="294" y="388" fill="#8b949e" font-size="9">• Urgent flag initialization</text>
+
+              <!-- Gateway Sequential Arrow 3 -> 4 -->
+              <line x1="377" y1="402" x2="377" y2="414" stroke="#d29922" stroke-width="1.5" marker-end="url(#sys-arrow-amber)" />
+
+              <rect x="282" y="414" width="190" height="100" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+              <text x="294" y="432" fill="#3fb950" font-size="10.5" font-weight="700">🧹 Noise Normalizer (src/ingest.py)</text>
+              <text x="294" y="449" fill="#8b949e" font-size="9">• Strips email reply headers</text>
+              <text x="294" y="464" fill="#8b949e" font-size="9">• Sanitizes multi-line breaks</text>
+              <text x="294" y="480" fill="#e3b341" font-size="8.5" font-family="'JetBrains Mono', monospace">NormalizedTicket Schema</text>
+              <text x="294" y="496" fill="#8b949e" font-size="8.5">Validated with Pydantic v2</text>
+
+              <!-- Gateway Sequential Arrow 4 -> 5 -->
+              <line x1="377" y1="514" x2="377" y2="528" stroke="#3fb950" stroke-width="1.5" marker-end="url(#sys-arrow-green)" />
+
+              <rect x="282" y="528" width="190" height="110" rx="8" fill="#161b22" stroke="#388bfd" stroke-width="1.2" />
+              <text x="294" y="546" fill="#58a6ff" font-size="10.5" font-weight="700">📦 Dispatched to LangGraph:</text>
+              <text x="294" y="564" fill="#8b949e" font-size="8.5" font-family="'JetBrains Mono', monospace">ticket_id: TICK-1024</text>
+              <text x="294" y="580" fill="#8b949e" font-size="8.5" font-family="'JetBrains Mono', monospace">channel: "email" | "chat" ...</text>
+              <text x="294" y="596" fill="#8b949e" font-size="8.5" font-family="'JetBrains Mono', monospace">customer_tier: "enterprise"</text>
+              <text x="294" y="612" fill="#3fb950" font-size="8.5" font-family="'JetBrains Mono', monospace">clean_text: "Normalized..."</text>
+            </g>
+
+            <!-- Line from Gateway Box 5 up corridor into LangGraph SupportState Entry -->
+            <path d="M 472 583 L 498 583 L 498 115 L 522 115" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#sys-arrow-blue)" />
+            <rect x="474" y="338" width="48" height="20" rx="4" fill="#0d1117" stroke="#388bfd" stroke-width="1" />
+            <text x="498" y="352" fill="#58a6ff" font-size="9" font-family="'JetBrains Mono', monospace" text-anchor="middle">invoke</text>
+
+            <!-- ================= LAYER 3: LANGGRAPH INTELLIGENCE CORE ================= -->
+            <rect x="510" y="60" width="440" height="590" rx="12" fill="#0d1117" stroke="#bc8cff" stroke-width="1.8" />
+            <rect x="510" y="60" width="440" height="32" rx="12" fill="rgba(188, 140, 255, 0.15)" />
+            <text x="730" y="81" fill="#bc8cff" font-size="11.5" font-weight="700" text-anchor="middle" letter-spacing="0.5">3. LANGGRAPH INTELLIGENCE CORE (src/graph.py)</text>
+
+            <!-- State Envelope Banner -->
+            <rect x="522" y="100" width="416" height="30" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+            <text x="535" y="120" fill="#8b949e" font-size="10" font-weight="600">Central Context Envelope:</text>
+            <text x="680" y="120" fill="#58a6ff" font-size="10" font-family="'JetBrains Mono', monospace">SupportState (TypedDict in src/graph.py)</text>
+
+            <!-- Arrows from State Envelope to retrieve_node and classify_node -->
+            <line x1="623" y1="130" x2="623" y2="140" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#sys-arrow-blue)" />
+            <line x1="837" y1="130" x2="837" y2="140" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#sys-arrow-purple)" />
+
+            <!-- Node 1: retrieve_node + Vector DB -->
+            <g class="graph-node-group">
+              <rect x="522" y="140" width="202" height="185" rx="8" fill="#161b22" stroke="#388bfd" stroke-width="1.2" />
+              <text x="534" y="160" fill="#58a6ff" font-size="11.5" font-weight="700">🔍 retrieve_node</text>
+              <text x="534" y="176" fill="#8b949e" font-size="9.5" font-family="'JetBrains Mono', monospace">src/retrieve.py</text>
+
+              <rect x="530" y="184" width="186" height="60" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="1" />
+              <text x="538" y="200" fill="#3fb950" font-size="9" font-weight="600">📚 Knowledge Base Subsystem</text>
+              <text x="538" y="215" fill="#8b949e" font-size="8.5">• 29 Runbooks &amp; Docs (storage/docs)</text>
+              <text x="538" y="228" fill="#8b949e" font-size="8.5">• RecursiveSplit (800c/100o) + all-MiniLM</text>
+              <text x="538" y="240" fill="#8b949e" font-size="8.5">• Persistent Chroma DB (storage/chroma)</text>
+
+              <text x="534" y="260" fill="#e6edf3" font-size="9.5">Retrieval Execution:</text>
+              <text x="534" y="275" fill="#8b949e" font-size="9">• Top-K semantic similarity search</text>
+              <text x="534" y="290" fill="#8b949e" font-size="9">• Score threshold &ge; 0.40 cutoff</text>
+              <text x="534" y="308" fill="#3fb950" font-size="9.5" font-weight="700">Sets: has_relevant_docs, retrieved_docs</text>
+            </g>
+
+            <!-- Node 2: classify_node + LLM Reasoning -->
+            <g class="graph-node-group">
+              <rect x="736" y="140" width="202" height="185" rx="8" fill="#161b22" stroke="#bc8cff" stroke-width="1.2" />
+              <text x="748" y="160" fill="#bc8cff" font-size="11.5" font-weight="700">🏷️ classify_node</text>
+              <text x="748" y="176" fill="#8b949e" font-size="9.5" font-family="'JetBrains Mono', monospace">src/classify.py</text>
+
+              <rect x="744" y="184" width="186" height="60" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="1" />
+              <text x="752" y="200" fill="#bc8cff" font-size="9" font-weight="600">🧠 LLM Reasoning Subsystem</text>
+              <text x="752" y="215" fill="#8b949e" font-size="8.5">• Llama-3.1-8B-Instruct (or Mock/Ollama)</text>
+              <text x="752" y="228" fill="#8b949e" font-size="8.5">• 22 Intents &amp; 3 Urgencies (low/med/crit)</text>
+              <text x="752" y="240" fill="#8b949e" font-size="8.5">• Confidence calibration &amp; fallback</text>
+
+              <text x="748" y="260" fill="#e6edf3" font-size="9.5">Technical Problem Diagnosis:</text>
+              <text x="748" y="275" fill="#e3b341" font-size="9">classification_reasoning</text>
+              <text x="748" y="290" fill="#8b949e" font-size="9">• Explains root-cause diagnosis</text>
+              <text x="748" y="308" fill="#bc8cff" font-size="9.5" font-weight="700">Sets: intent, confidence, urgency</text>
+            </g>
+
+            <!-- Clean Parallel Vertical Arrows to route_node -->
+            <line x1="623" y1="325" x2="623" y2="345" stroke="#58a6ff" stroke-width="2" marker-end="url(#sys-arrow-blue)" />
+            <line x1="837" y1="325" x2="837" y2="345" stroke="#bc8cff" stroke-width="2" marker-end="url(#sys-arrow-purple)" />
+
+            <!-- Node 3: route_node (Deterministic Policy Router) -->
+            <g class="graph-node-group">
+              <rect x="522" y="345" width="416" height="180" rx="8" fill="#161b22" stroke="#d29922" stroke-width="1.5" />
+              <rect x="522" y="345" width="416" height="26" rx="8" fill="rgba(210, 153, 34, 0.15)" />
+              <text x="534" y="363" fill="#d29922" font-size="11.5" font-weight="700">🧭 route_node — Deterministic 7-Layer Policy Gate</text>
+              <text x="926" y="363" fill="#8b949e" font-size="9" font-family="'JetBrains Mono', monospace" text-anchor="end">src/route.py</text>
+
+              <text x="534" y="388" fill="#8b949e" font-size="9.5">Layer 1: Emergency Kill-Switch Check &rarr; Active? ➔ Immediate Escalate</text>
+              <text x="534" y="405" fill="#8b949e" font-size="9.5">Layer 2: High-Risk Intent Filter &rarr; security_incident / data_loss ➔ Escalate</text>
+              <text x="534" y="422" fill="#8b949e" font-size="9.5">Layer 3: Policy Exclusion Filter &rarr; refund_request / account_deletion ➔ Escalate</text>
+              <text x="534" y="439" fill="#8b949e" font-size="9.5">Layer 4: Enterprise Critical Urgency SLA Escalation ➔ Fast-track Tier-2</text>
+              <text x="534" y="456" fill="#8b949e" font-size="9.5">Layer 5: Calibrated Confidence Floor &rarr; confidence &lt; 0.80 ➔ Escalate</text>
+              <text x="534" y="473" fill="#8b949e" font-size="9.5">Layer 6: Knowledge Base Grounding Gate &rarr; has_relevant_docs == False ➔ Escalate</text>
+              <text x="534" y="493" fill="#3fb950" font-size="10" font-weight="700">✓ If All 6 Pass ➔ auto_respond | ✗ If Any Fails ➔ escalate</text>
+              <text x="534" y="512" fill="#d29922" font-size="9">Builds EscalationPacket with Dual-Layer Handover Notes if escalating</text>
+            </g>
+
+            <!-- Decision Diamond -->
+            <line x1="730" y1="525" x2="730" y2="540" stroke="#d29922" stroke-width="2" marker-end="url(#sys-arrow-amber)" />
+            <polygon points="730,540 805,565 730,590 655,565" fill="#2a2111" stroke="#d29922" stroke-width="1.8" filter="url(#sys-glow)" />
+            <text x="730" y="562" fill="#f0f6fc" font-size="10" font-weight="700" text-anchor="middle">Route Branch?</text>
+            <text x="730" y="576" fill="#d29922" font-size="8.5" font-family="'JetBrains Mono', monospace" text-anchor="middle">state['route']</text>
+
+            <!-- Routing Paths from Diamond to Resolution Lanes -->
+            <!-- auto_respond Path (Green) -> generate_node at (987, 142) -->
+            <path d="M 805 565 L 958 565 L 958 142 L 987 142" fill="none" stroke="#3fb950" stroke-width="2" marker-end="url(#sys-arrow-green)" />
+            <rect x="830" y="554" width="95" height="22" rx="4" fill="#1c3321" stroke="#238636" stroke-width="1" />
+            <text x="877" y="569" fill="#3fb950" font-size="9" font-weight="700" text-anchor="middle">auto_respond ➔</text>
+
+            <!-- escalate Path (Red) -> Contextual Escalation Packet at (987, 440) -->
+            <path d="M 730 590 L 730 615 L 968 615 L 968 440 L 987 440" fill="none" stroke="#f85149" stroke-width="2" marker-end="url(#sys-arrow-red)" />
+            <rect x="825" y="604" width="85" height="22" rx="4" fill="#3c1e1e" stroke="#da3633" stroke-width="1" />
+            <text x="867" y="619" fill="#f85149" font-size="9" font-weight="700" text-anchor="middle">escalate ➔</text>
+
+            <!-- ================= LAYER 4: DUAL RESOLUTION LANES ================= -->
+
+            <!-- LANE 4A: AUTONOMOUS RESOLUTION LANE -->
+            <g class="graph-node-group">
+              <rect x="975" y="60" width="365" height="275" rx="12" fill="#0d1117" stroke="#3fb950" stroke-width="1.8" />
+              <rect x="975" y="60" width="365" height="32" rx="12" fill="rgba(63, 185, 80, 0.15)" />
+              <text x="1157" y="81" fill="#3fb950" font-size="11.5" font-weight="700" text-anchor="middle" letter-spacing="0.5">4A. AUTONOMOUS AI RESOLUTION LANE</text>
+
+              <rect x="987" y="100" width="341" height="85" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+              <text x="999" y="120" fill="#3fb950" font-size="11" font-weight="700">✍️ generate_node (src/generate.py)</text>
+              <text x="999" y="137" fill="#8b949e" font-size="9.5">• Grounded response generation strictly citing [DOC-ID]</text>
+              <text x="999" y="153" fill="#8b949e" font-size="9.5">• Synthesizes auto_respond_summary with citation count</text>
+              <text x="999" y="169" fill="#8b949e" font-size="9.5">• Calculates generation_confidence &amp; flags missing info</text>
+
+              <!-- Lane 4A Internal Connector: generate -> guardrails -->
+              <line x1="1157" y1="185" x2="1157" y2="193" stroke="#3fb950" stroke-width="1.8" marker-end="url(#sys-arrow-green)" />
+
+              <rect x="987" y="193" width="341" height="85" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+              <text x="999" y="213" fill="#f85149" font-size="11" font-weight="700">🛡️ guardrails_node (src/guardrails.py)</text>
+              <text x="999" y="230" fill="#8b949e" font-size="9.5">• PII &amp; Credentials scanner (Regex / Secret rules)</text>
+              <text x="999" y="246" fill="#8b949e" font-size="9.5">• Citation authenticity &amp; hallucination detection</text>
+              <text x="999" y="262" fill="#f85149" font-size="9.5" font-weight="600">Strict Rule: "Block and escalate. Never redact and send."</text>
+
+              <!-- Lane 4A Internal Connector: guardrails -> dispatched -->
+              <line x1="1157" y1="278" x2="1157" y2="286" stroke="#3fb950" stroke-width="1.8" marker-end="url(#sys-arrow-green)" />
+
+              <rect x="987" y="286" width="341" height="38" rx="6" fill="#1c3321" stroke="#238636" stroke-width="1.2" />
+              <text x="1157" y="310" fill="#3fb950" font-size="10.5" font-weight="700" text-anchor="middle">🚀 Dispatched to Customer Origin Channel (Email/Chat/Docs/Forum)</text>
+            </g>
+
+            <!-- LANE 4B: TIER-2 HUMAN ESCALATION LANE -->
+            <g class="graph-node-group">
+              <rect x="975" y="350" width="365" height="300" rx="12" fill="#0d1117" stroke="#f85149" stroke-width="1.8" />
+              <rect x="975" y="350" width="365" height="32" rx="12" fill="rgba(248, 81, 73, 0.15)" />
+              <text x="1157" y="371" fill="#f85149" font-size="11.5" font-weight="700" text-anchor="middle" letter-spacing="0.5">4B. TIER-2 HUMAN ESCALATION LANE</text>
+
+              <rect x="987" y="390" width="341" height="135" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+              <text x="999" y="410" fill="#f85149" font-size="11" font-weight="700">📋 Contextual Escalation Packet (src/route.py)</text>
+              <text x="999" y="428" fill="#58a6ff" font-size="9.5" font-weight="600">Dual-Layer Handover Notes:</text>
+              <text x="1009" y="445" fill="#e6edf3" font-size="9" font-family="'JetBrains Mono', monospace">1. Policy Trigger: "Classifier confidence (0.72) &lt; 0.80"</text>
+              <text x="1009" y="460" fill="#e6edf3" font-size="9" font-family="'JetBrains Mono', monospace">2. Issue Analysis: "User experiencing key scope failure"</text>
+              <text x="999" y="480" fill="#8b949e" font-size="9.5">• Top 3 Attempted KB Snippets &amp; Relevance Scores</text>
+              <text x="999" y="496" fill="#8b949e" font-size="9.5">• Customer Context: Tier, Region, SLA Target</text>
+              <text x="999" y="512" fill="#3fb950" font-size="9.5">Zero customer repetition — Tier-2 starts fully briefed</text>
+
+              <!-- Lane 4B Internal Connector: packet -> pagerduty -->
+              <line x1="1157" y1="525" x2="1157" y2="533" stroke="#f85149" stroke-width="1.8" marker-end="url(#sys-arrow-red)" />
+
+              <rect x="987" y="533" width="341" height="52" rx="6" fill="#3c1e1e" stroke="#da3633" stroke-width="1" />
+              <text x="999" y="553" fill="#f85149" font-size="10.5" font-weight="700">🚨 PagerDuty &amp; Jira Service Management</text>
+              <text x="999" y="571" fill="#8b949e" font-size="9.5">Critical/Enterprise SLA triggers immediate on-call page</text>
+
+              <!-- Lane 4B Internal Connector: pagerduty -> tier2 -->
+              <line x1="1157" y1="585" x2="1157" y2="593" stroke="#f85149" stroke-width="1.8" marker-end="url(#sys-arrow-red)" />
+
+              <rect x="987" y="593" width="341" height="45" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+              <text x="1157" y="612" fill="#e6edf3" font-size="10" font-weight="700" text-anchor="middle">🧑‍💻 Assigned to Tier-2 Cloud Support Engineer</text>
+              <text x="1157" y="628" fill="#8b949e" font-size="9" text-anchor="middle">Manual resolution + closes ticket with customer</text>
+            </g>
+
+            <!-- Downward lines from Lane 4A and 4B to Governance -->
+            <path d="M 1328 305 L 1344 305 L 1344 670" fill="none" stroke="#3fb950" stroke-width="1.8" marker-end="url(#sys-arrow-green)" />
+            <line x1="1157" y1="638" x2="1157" y2="670" stroke="#f85149" stroke-width="2" marker-end="url(#sys-arrow-red)" />
+            <rect x="1080" y="646" width="154" height="20" rx="4" fill="#161b22" stroke="#bc8cff" stroke-width="1.2" />
+            <text x="1157" y="660" fill="#bc8cff" font-size="9" font-family="'JetBrains Mono', monospace" text-anchor="middle">💾 log_decision_node</text>
+
+            <!-- ================= LAYER 5: GOVERNANCE, AUDIT STORE & CLOSED-LOOP ================= -->
+            <rect x="20" y="670" width="1320" height="275" rx="12" fill="#0d1117" stroke="#bc8cff" stroke-width="1.8" />
+            <rect x="20" y="670" width="1320" height="32" rx="12" fill="rgba(188, 140, 255, 0.15)" />
+            <text x="680" y="691" fill="#bc8cff" font-size="12" font-weight="700" text-anchor="middle" letter-spacing="0.5">5. ENTERPRISE GOVERNANCE, AUDIT STORE &amp; CLOSED-LOOP OBSERVABILITY (src/logging_store.py)</text>
+
+            <!-- Audit Bus connector entering SQLite Decision Store -->
+            <path d="M 1157 670 L 1157 700 L 242 700 L 242 715" fill="none" stroke="#bc8cff" stroke-width="1.8" stroke-dasharray="4" marker-end="url(#sys-arrow-purple)" />
+            <path d="M 1344 670 L 1344 700 L 1157 700" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="4" />
+
+            <!-- Card 1: SQLite Store -->
+            <g class="graph-node-group">
+              <rect x="35" y="715" width="415" height="215" rx="8" fill="#161b22" stroke="#bc8cff" stroke-width="1.2" />
+              <text x="48" y="738" fill="#bc8cff" font-size="12" font-weight="700">💾 SQLite Decision Store (storage/decisions.db)</text>
+              <text x="48" y="758" fill="#8b949e" font-size="10">Conforms to 15-Field Minimum Record Schema:</text>
+              <text x="58" y="777" fill="#e6edf3" font-size="9" font-family="'JetBrains Mono', monospace">• decision_id, ticket_id, timestamp, channel</text>
+              <text x="58" y="794" fill="#e6edf3" font-size="9" font-family="'JetBrains Mono', monospace">• intent, confidence, urgency, customer_tier</text>
+              <text x="58" y="811" fill="#e6edf3" font-size="9" font-family="'JetBrains Mono', monospace">• action_taken (auto_respond | escalate | block)</text>
+              <text x="58" y="828" fill="#e6edf3" font-size="9" font-family="'JetBrains Mono', monospace">• reason (Auto-response summary or Handover notes)</text>
+              <text x="58" y="845" fill="#e6edf3" font-size="9" font-family="'JetBrains Mono', monospace">• sources_used (doc_id, score), latency_ms</text>
+              <text x="58" y="862" fill="#e6edf3" font-size="9" font-family="'JetBrains Mono', monospace">• escalation_packet &amp; guardrail_results (JSON)</text>
+              <rect x="48" y="880" width="389" height="34" rx="5" fill="#0d1117" stroke="#30363d" stroke-width="1" />
+              <text x="242" y="901" fill="#3fb950" font-size="10" font-weight="600" text-anchor="middle">✓ 100% of decisions permanently recorded for compliance</text>
+            </g>
+
+            <!-- Card 2: 1:1 Coverage Reconciliation Engine -->
+            <g class="graph-node-group">
+              <rect x="472" y="715" width="415" height="215" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1.2" />
+              <text x="485" y="738" fill="#58a6ff" font-size="12" font-weight="700">⚖️ 1:1 Coverage Reconciliation Engine</text>
+              <text x="485" y="758" fill="#8b949e" font-size="10">reconcile_decisions_with_tickets(ticket_ids)</text>
+              <text x="485" y="778" fill="#8b949e" font-size="9.5">• Queries SQLite DB for distinct ticket IDs</text>
+              <text x="485" y="796" fill="#8b949e" font-size="9.5">• Computes set difference: missing = expected - logged</text>
+              <text x="485" y="814" fill="#8b949e" font-size="9.5">• Asserts zero unlogged 'ghost' decisions</text>
+              <text x="485" y="832" fill="#8b949e" font-size="9.5">• Verifies complete audit trail across all 4 channels</text>
+
+              <rect x="485" y="850" width="389" height="64" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="1" />
+              <text x="495" y="870" fill="#3fb950" font-size="9" font-family="'JetBrains Mono', monospace">is_reconciled = (len(missing) == 0)</text>
+              <text x="495" y="888" fill="#8b949e" font-size="9" font-family="'JetBrains Mono', monospace">120/120 logged (100.0% coverage, 0 gaps)</text>
+              <text x="495" y="904" fill="#58a6ff" font-size="9" font-family="'JetBrains Mono', monospace">Passes AC-A8 Governance Requirements</text>
+            </g>
+
+            <!-- Card 3: Batch Evaluation & Real-Time API -->
+            <g class="graph-node-group">
+              <rect x="908" y="715" width="415" height="215" rx="8" fill="#161b22" stroke="#3fb950" stroke-width="1.2" />
+              <text x="921" y="738" fill="#3fb950" font-size="12" font-weight="700">📊 Evaluation Harness &amp; Operational API</text>
+              <text x="921" y="758" fill="#8b949e" font-size="10">evaluation/harness.py (The Gate — AC-A9)</text>
+              <text x="921" y="776" fill="#8b949e" font-size="9">• Unattended batch across 120 validation tickets</text>
+              <text x="921" y="792" fill="#8b949e" font-size="9">• Computes FCR (&ge;60%), Escalation (&le;30%), P95 (&lt;300s)</text>
+              <text x="921" y="808" fill="#8b949e" font-size="9">• Precision (&ge;85%), Citations (&ge;95%), Zero PII leaks</text>
+
+              <text x="921" y="830" fill="#58a6ff" font-size="11" font-weight="700">FastAPI Operational Endpoints (src/api.py)</text>
+              <text x="921" y="848" fill="#8b949e" font-size="9">• POST /tickets (Triage) | GET /health</text>
+              <text x="921" y="864" fill="#8b949e" font-size="9">• GET /metrics (Live FCR, Escalation rate, Intent mix)</text>
+              <text x="921" y="880" fill="#f85149" font-size="9">• POST /admin/kill-switch (Emergency manual override)</text>
+              <rect x="921" y="892" width="389" height="25" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="1" />
+              <text x="1115" y="908" fill="#e3b341" font-size="9" font-weight="600" text-anchor="middle">⚡ Production-ready observability &amp; governance</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- COMPONENT CARDS BREAKDOWN -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">📦 Low-Level Component Architecture</h2>
+            <p class="card-subtitle">End-to-end component breakdown conforming to Setup Guide Section 08 &amp; Build Spec AC-A1 through AC-A10.</p>
+          </div>
+        </div>
+
+        <div class="comp-grid">
+          <!-- Ingest -->
+          <div class="comp-box">
+            <span class="comp-badge badge-ingest">B-02 / AC-A2</span>
+            <div class="comp-name">Ingestion & Normalizer</div>
+            <div class="comp-file">src/ingest.py</div>
+            <div class="comp-desc">
+              Parses raw payloads across 4 channels (Email, Chat, Docs Comments, Forum) into standard <code>NormalizedTicket</code> Pydantic models. Sanitizes line breaks, handles empty subjects, and preserves customer metadata.
+            </div>
+          </div>
+
+          <!-- Retrieval -->
+          <div class="comp-box">
+            <span class="comp-badge badge-retrieve">B-03, B-04 / AC-A4</span>
+            <div class="comp-name">Vector Search & Chunker</div>
+            <div class="comp-file">src/retrieve.py</div>
+            <div class="comp-desc">
+              Splits 29 KB articles with <code>RecursiveCharacterTextSplitter</code> (size: 800, overlap: 100), prepends titles for semantic grounding, embeds with <code>all-MiniLM-L6-v2</code> into Chroma (<code>./storage/chroma</code>), and applies a 0.40 similarity threshold.
+            </div>
+          </div>
+
+          <!-- Classify -->
+          <div class="comp-box">
+            <span class="comp-badge badge-classify">B-06 / AC-A3</span>
+            <div class="comp-name">Intent & Urgency Classifier</div>
+            <div class="comp-file">src/classify.py</div>
+            <div class="comp-desc">
+              Executes prompt <code>classify_v1.txt</code> with <code>meta-llama/llama-3.1-8b-instruct</code> via OpenRouter. Classifies 22 ground-truth intents and 3 urgencies with calibrated confidence and ranked candidate alternatives.
+            </div>
+          </div>
+
+          <!-- Route -->
+          <div class="comp-box">
+            <span class="comp-badge badge-route">B-07 / AC-A5</span>
+            <div class="comp-name">Deterministic Policy Router</div>
+            <div class="comp-file">src/route.py</div>
+            <div class="comp-desc">
+              Enforces 7 hierarchical safety rules (Kill switch, high-risk intent filter, exclusion policy, enterprise SLA, 0.80 confidence floor, doc grounding). If escalated, compiles rich Tier-2 Contextual Escalation Packets.
+            </div>
+          </div>
+
+          <!-- Generate -->
+          <div class="comp-box">
+            <span class="comp-badge badge-generate">B-08 / AC-A6</span>
+            <div class="comp-name">Grounded Answer Generator</div>
+            <div class="comp-file">src/generate.py</div>
+            <div class="comp-desc">
+              Executes prompt <code>generate_v1.txt</code> strictly grounded in retrieved Chroma passages. Enforces mandatory inline <code>[DOC-ID]</code> citation syntax (extracted via regex). Adapts tone by channel.
+            </div>
+          </div>
+
+          <!-- Guardrails -->
+          <div class="comp-box">
+            <span class="comp-badge badge-guardrails">B-09 / AC-A7</span>
+            <div class="comp-name">Pre-Release Safety Guardrails</div>
+            <div class="comp-file">src/guardrails.py</div>
+            <div class="comp-desc">
+              Enforces Governance Framework Section 4: PII/Secrets leakage check, citation authenticity check against retrieved context, prompt injection detection, and unauthorized commitment blocker. <em>"Block and escalate. Never redact and send."</em>
+            </div>
+          </div>
+
+          <!-- Decision Logging -->
+          <div class="comp-box">
+            <span class="comp-badge badge-log">B-10 / AC-A8</span>
+            <div class="comp-name">SQLite Governance Audit Store</div>
+            <div class="comp-file">src/logging_store.py</div>
+            <div class="comp-desc">
+              Persists 100% of automated decisions into SQLite (<code>./storage/decisions.db</code>) conforming to the 15-field Minimum Record Schema. Supports 1:1 coverage reconciliation against processed tickets.
+            </div>
+          </div>
+
+          <!-- LangGraph Orchestrator -->
+          <div class="comp-box">
+            <span class="comp-badge badge-ingest">Orchestrator</span>
+            <div class="comp-name">LangGraph StateGraph</div>
+            <div class="comp-file">src/graph.py</div>
+            <div class="comp-desc">
+              Compiles all nodes into an executable StateGraph. Manages the unified <code>SupportState</code> and coordinates conditional transitions between auto-respond and escalation branches.
+            </div>
+          </div>
+
+          <!-- API & Harness -->
+          <div class="comp-box">
+            <span class="comp-badge badge-retrieve">B-05, B-11 / AC-A9</span>
+            <div class="comp-name">Evaluation Harness & API</div>
+            <div class="comp-file">evaluation/harness.py & src/api.py</div>
+            <div class="comp-desc">
+              <code>harness.py</code>: Standalone CLI that runs 120-ticket batch evaluation unattended in-memory, computing FCR, Latency, Precision, Citations, and Fairness.<br>
+              <code>api.py</code>: FastAPI REST service exposing <code>/tickets</code>, <code>/metrics</code>, and <code>/admin/kill-switch</code>.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: LANGGRAPH STATE & VARIABLE MUTATION MAP -->
+    <section id="tab-langgraph" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">⚡ LangGraph StateGraph Architecture</h2>
+            <p class="card-subtitle">Visual representation of nodes, sequential flow, conditional edges, and terminal states.</p>
+          </div>
+        </div>
+
+        <div style="width: 100%; overflow-x: auto; padding: 1rem 0;">
+          <svg viewBox="0 0 1000 1060" style="width: 100%; max-width: 1000px; display: block; margin: 0 auto; font-family: 'Inter', -apple-system, sans-serif;">
+            <defs>
+              <!-- Arrowhead markers -->
+              <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#58a6ff" />
+              </marker>
+              <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#d29922" />
+              </marker>
+              <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#3fb950" />
+              </marker>
+              <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#f85149" />
+              </marker>
+              <!-- Filters for subtle glow -->
+              <filter id="glow-amber" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            <!-- START NODE -->
+            <rect x="375" y="15" width="250" height="42" rx="21" fill="#1f6feb" stroke="#58a6ff" stroke-width="2"/>
+            <text x="500" y="41" fill="#ffffff" font-size="13" font-weight="700" text-anchor="middle" letter-spacing="0.5">● START (Initial Ticket State)</text>
+
+            <!-- Edge Start -> Retrieve -->
+            <line x1="500" y1="57" x2="500" y2="88" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+            <!-- NODE 1: RETRIEVE -->
+            <g class="graph-node-group">
+              <rect x="270" y="88" width="460" height="96" rx="10" fill="#161b22" stroke="#388bfd" stroke-width="1.8"/>
+              <rect x="270" y="88" width="460" height="30" rx="10" fill="rgba(56, 139, 253, 0.15)"/>
+              <text x="285" y="110" fill="#58a6ff" font-size="13.5" font-weight="700">🔍 retrieve_node</text>
+              <text x="715" y="110" fill="#8b949e" font-size="11" font-family="'JetBrains Mono', monospace" text-anchor="end">src/retrieve.py</text>
+              <text x="285" y="139" fill="#8b949e" font-size="12">📥 Reads State: <tspan fill="#e6edf3" font-family="'JetBrains Mono', monospace">cleaned_text</tspan></text>
+              <text x="285" y="163" fill="#8b949e" font-size="12">📤 Mutates State: <tspan fill="#3fb950" font-weight="600" font-size="10.5" font-family="'JetBrains Mono', monospace">retrieved_docs, top_score, has_relevant_docs</tspan></text>
+            </g>
+
+            <!-- Edge Retrieve -> Classify -->
+            <line x1="500" y1="184" x2="500" y2="216" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+            <!-- NODE 2: CLASSIFY -->
+            <g class="graph-node-group">
+              <rect x="270" y="216" width="460" height="96" rx="10" fill="#161b22" stroke="#bc8cff" stroke-width="1.8"/>
+              <rect x="270" y="216" width="460" height="30" rx="10" fill="rgba(188, 140, 255, 0.15)"/>
+              <text x="285" y="238" fill="#bc8cff" font-size="13.5" font-weight="700">🏷️ classify_node</text>
+              <text x="715" y="238" fill="#8b949e" font-size="11" font-family="'JetBrains Mono', monospace" text-anchor="end">src/classify.py</text>
+              <text x="285" y="267" fill="#8b949e" font-size="12">📥 Reads State: <tspan fill="#e6edf3" font-size="11" font-family="'JetBrains Mono', monospace">cleaned_text, channel, customer_tier</tspan></text>
+              <text x="285" y="291" fill="#8b949e" font-size="12">📤 Mutates State: <tspan fill="#3fb950" font-weight="600" font-size="10.5" font-family="'JetBrains Mono', monospace">predicted_intent, intent_confidence, urgency</tspan></text>
+            </g>
+
+            <!-- Edge Classify -> Route -->
+            <line x1="500" y1="312" x2="500" y2="344" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+            <!-- NODE 3: ROUTE -->
+            <g class="graph-node-group">
+              <rect x="270" y="344" width="460" height="106" rx="10" fill="#161b22" stroke="#d29922" stroke-width="1.8"/>
+              <rect x="270" y="344" width="460" height="30" rx="10" fill="rgba(210, 153, 34, 0.15)"/>
+              <text x="285" y="366" fill="#d29922" font-size="13.5" font-weight="700">🧭 route_node</text>
+              <text x="715" y="366" fill="#8b949e" font-size="11" font-family="'JetBrains Mono', monospace" text-anchor="end">src/route.py</text>
+              <text x="285" y="396" fill="#8b949e" font-size="12">📥 Reads State: <tspan fill="#e6edf3" font-size="11" font-family="'JetBrains Mono', monospace">predicted_intent, intent_confidence, docs, tier</tspan></text>
+              <text x="285" y="424" fill="#8b949e" font-size="12">📤 Mutates State: <tspan fill="#3fb950" font-weight="600" font-size="10.5" font-family="'JetBrains Mono', monospace">route, escalation_reason, escalation_packet</tspan></text>
+            </g>
+
+            <!-- Edge Route -> Decision Diamond -->
+            <line x1="500" y1="450" x2="500" y2="475" stroke="#d29922" stroke-width="2" marker-end="url(#arrow-amber)"/>
+
+            <!-- DECISION DIAMOND: ROUTE DECISION -->
+            <g>
+              <polygon points="500,475 640,510 500,545 360,510" fill="#2d2208" stroke="#d29922" stroke-width="2" filter="url(#glow-amber)"/>
+              <text x="500" y="506" fill="#f0f6fc" font-size="12" font-weight="700" text-anchor="middle">Route Branch?</text>
+              <text x="500" y="522" fill="#d29922" font-size="10" font-family="'JetBrains Mono', monospace" text-anchor="middle">state['route']</text>
+            </g>
+
+            <!-- Left Branch: Auto-Respond -->
+            <path d="M 360 510 L 190 510 L 190 570" fill="none" stroke="#3fb950" stroke-width="2" marker-end="url(#arrow-green)"/>
+            <rect x="225" y="488" width="105" height="22" rx="5" fill="#1c3321" stroke="#238636" stroke-width="1"/>
+            <text x="277" y="503" fill="#3fb950" font-size="10" font-weight="700" text-anchor="middle">'auto_respond'</text>
+
+            <!-- Right Branch: Escalate (Clear of center nodes, enters log_decision symmetrically) -->
+            <path d="M 640 510 L 810 510 L 810 885 L 720 885" fill="none" stroke="#f85149" stroke-width="2" marker-end="url(#arrow-red)"/>
+            <rect x="660" y="488" width="135" height="22" rx="5" fill="#3c1e1e" stroke="#da3633" stroke-width="1"/>
+            <text x="727" y="503" fill="#f85149" font-size="10" font-weight="700" text-anchor="middle">'escalate' (Policy / Risk)</text>
+
+            <!-- NODE 4: GENERATE (Auto-Respond branch) -->
+            <g class="graph-node-group">
+              <rect x="15" y="570" width="350" height="96" rx="10" fill="#161b22" stroke="#3fb950" stroke-width="1.8"/>
+              <rect x="15" y="570" width="350" height="30" rx="10" fill="rgba(63, 185, 80, 0.15)"/>
+              <text x="30" y="592" fill="#3fb950" font-size="13" font-weight="700">✍️ generate_node</text>
+              <text x="350" y="592" fill="#8b949e" font-size="10.5" font-family="'JetBrains Mono', monospace" text-anchor="end">src/generate.py</text>
+              <text x="30" y="621" fill="#8b949e" font-size="11.5">📥 Reads State: <tspan fill="#e6edf3" font-size="10.5" font-family="'JetBrains Mono', monospace">retrieved_docs, intent, channel</tspan></text>
+              <text x="30" y="645" fill="#8b949e" font-size="11.5">📤 Mutates State: <tspan fill="#3fb950" font-weight="600" font-size="10.5" font-family="'JetBrains Mono', monospace">generated_response, citations</tspan></text>
+            </g>
+
+            <!-- Edge Generate -> Guardrails -->
+            <line x1="190" y1="666" x2="190" y2="700" stroke="#3fb950" stroke-width="2" marker-end="url(#arrow-green)"/>
+
+            <!-- NODE 5: GUARDRAILS -->
+            <g class="graph-node-group">
+              <rect x="15" y="700" width="350" height="115" rx="10" fill="#161b22" stroke="#f85149" stroke-width="1.8"/>
+              <rect x="15" y="700" width="350" height="30" rx="10" fill="rgba(248, 81, 73, 0.15)"/>
+              <text x="30" y="722" fill="#f85149" font-size="13" font-weight="700">🛡️ guardrails_node</text>
+              <text x="350" y="722" fill="#8b949e" font-size="10.5" font-family="'JetBrains Mono', monospace" text-anchor="end">src/guardrails.py</text>
+              <text x="30" y="750" fill="#8b949e" font-size="11.5">📥 Reads State: <tspan fill="#e6edf3" font-size="10.5" font-family="'JetBrains Mono', monospace">generated_response, docs</tspan></text>
+              <text x="30" y="773" fill="#8b949e" font-size="11.5">📤 Mutates State: <tspan fill="#3fb950" font-weight="600" font-size="10" font-family="'JetBrains Mono', monospace">guardrail_passed, guardrail_blocked</tspan></text>
+              <text x="30" y="796" fill="#d29922" font-size="10" font-style="italic">⚠️ Violated: Wipes response=None, route='escalate'</text>
+            </g>
+
+            <!-- Guardrails to Log Decision (Clean vertical line with badge, enters left border) -->
+            <path d="M 190 815 L 190 885 L 280 885" fill="none" stroke="#3fb950" stroke-width="2" marker-end="url(#arrow-green)"/>
+            <rect x="145" y="836" width="90" height="20" rx="4" fill="#1c3321" stroke="#238636" stroke-width="1"/>
+            <text x="190" y="850" fill="#3fb950" font-size="9" font-weight="700" text-anchor="middle">Passed / Tripped</text>
+
+            <!-- NODE 6: LOG DECISION (Centered, perfectly symmetrical inputs) -->
+            <g class="graph-node-group">
+              <rect x="280" y="835" width="440" height="96" rx="10" fill="#161b22" stroke="#58a6ff" stroke-width="1.8"/>
+              <rect x="280" y="835" width="440" height="30" rx="10" fill="rgba(88, 166, 255, 0.15)"/>
+              <text x="295" y="856" fill="#58a6ff" font-size="13.5" font-weight="700">💾 log_decision_node</text>
+              <text x="705" y="856" fill="#8b949e" font-size="11" font-family="'JetBrains Mono', monospace" text-anchor="end">src/logging_store.py</text>
+              <text x="295" y="885" fill="#8b949e" font-size="11.5">📥 Reads State: <tspan fill="#e6edf3" font-size="10.5" font-family="'JetBrains Mono', monospace">Complete SupportState (15 Audit Schema fields)</tspan></text>
+              <text x="295" y="909" fill="#8b949e" font-size="11.5">📤 Mutates State: <tspan fill="#3fb950" font-weight="600" font-size="10.5" font-family="'JetBrains Mono', monospace">decision_id, logged_to_audit_store</tspan></text>
+            </g>
+
+            <!-- Edge Log -> End -->
+            <line x1="500" y1="931" x2="500" y2="968" stroke="#3fb950" stroke-width="2" marker-end="url(#arrow-green)"/>
+
+            <!-- END NODE -->
+            <rect x="365" y="968" width="270" height="42" rx="21" fill="#238636" stroke="#3fb950" stroke-width="2"/>
+            <text x="500" y="994" fill="#ffffff" font-size="13" font-weight="700" text-anchor="middle" letter-spacing="0.5">● END (Audit Persisted to SQLite)</text>
+          </svg>
+        </div>
+      </div>
+
+      <!-- State Variables Mapping Table -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">📋 SupportState Variable Mutation Lifecycle</h2>
+            <p class="card-subtitle">Tracks every variable in the TypedDict, where it is initialized, and which node reads or modifies it.</p>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Variable Name</th>
+              <th>Type</th>
+              <th>Initialized By</th>
+              <th>Mutated By (Writer Node)</th>
+              <th>Consumed By (Reader Node)</th>
+              <th>Purpose / Definition</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="var-badge">ticket_id</span></td>
+              <td><code>str</code></td>
+              <td>Initial State / Ingest</td>
+              <td>—</td>
+              <td><span class="node-pill pill-route">route</span> <span class="node-pill pill-generate">generate</span> <span class="node-pill pill-log">log</span></td>
+              <td>Unique ticket ID (e.g. <code>DEV-0001</code>)</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">channel</span></td>
+              <td><code>str</code></td>
+              <td>Initial State / Ingest</td>
+              <td>—</td>
+              <td><span class="node-pill pill-classify">classify</span> <span class="node-pill pill-generate">generate</span> <span class="node-pill pill-log">log</span></td>
+              <td>Source channel (<code>email</code>, <code>chat</code>, <code>docs_comment</code>, <code>forum</code>)</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">clean_text</span></td>
+              <td><code>str</code></td>
+              <td>Initial State / Ingest</td>
+              <td>—</td>
+              <td><span class="node-pill pill-retrieve">retrieve</span> <span class="node-pill pill-classify">classify</span> <span class="node-pill pill-generate">generate</span></td>
+              <td>Sanitized, unified query text (subject + body)</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">customer_tier</span></td>
+              <td><code>str</code></td>
+              <td>Initial State / Ingest</td>
+              <td>—</td>
+              <td><span class="node-pill pill-classify">classify</span> <span class="node-pill pill-route">route</span></td>
+              <td>Account tier: <code>enterprise</code>, <code>business</code>, <code>standard</code>, <code>free</code></td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">retrieved_passages</span></td>
+              <td><code>List[Dict]</code></td>
+              <td>Initial State (empty)</td>
+              <td><span class="node-pill pill-retrieve">retrieve_node</span></td>
+              <td><span class="node-pill pill-route">route</span> <span class="node-pill pill-generate">generate</span> <span class="node-pill pill-guardrails">guardrails</span></td>
+              <td>Top-k passages from Chroma with doc_id, score, and title</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">top_score</span></td>
+              <td><code>float</code></td>
+              <td>Initial State (0.0)</td>
+              <td><span class="node-pill pill-retrieve">retrieve_node</span></td>
+              <td><span class="node-pill pill-route">route</span> <span class="node-pill pill-log">log</span></td>
+              <td>Maximum semantic similarity score achieved</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">has_relevant_docs</span></td>
+              <td><code>bool</code></td>
+              <td>Initial State (False)</td>
+              <td><span class="node-pill pill-retrieve">retrieve_node</span></td>
+              <td><span class="node-pill pill-route">route_node</span></td>
+              <td>True if top_score &ge; 0.40 similarity threshold</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">intent</span></td>
+              <td><code>str</code></td>
+              <td>Initial State ("")</td>
+              <td><span class="node-pill pill-classify">classify_node</span></td>
+              <td><span class="node-pill pill-route">route</span> <span class="node-pill pill-log">log</span></td>
+              <td>Classified category (one of 22 canonical intents)</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">urgency</span></td>
+              <td><code>str</code></td>
+              <td>Initial State ("medium")</td>
+              <td><span class="node-pill pill-classify">classify_node</span></td>
+              <td><span class="node-pill pill-route">route</span> <span class="node-pill pill-log">log</span></td>
+              <td>Detected urgency: <code>high</code>, <code>medium</code>, <code>low</code></td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">classification_confidence</span></td>
+              <td><code>float</code></td>
+              <td>Initial State (0.0)</td>
+              <td><span class="node-pill pill-classify">classify_node</span></td>
+              <td><span class="node-pill pill-route">route_node</span></td>
+              <td>Numeric calibrated confidence &in; [0.0, 1.0]</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">route</span></td>
+              <td><code>str</code></td>
+              <td>Initial State ("escalate")</td>
+              <td><span class="node-pill pill-route">route_node</span>, <span class="node-pill pill-guardrails">guardrails_node</span></td>
+              <td>Conditional Edges, <span class="node-pill pill-generate">generate</span>, <span class="node-pill pill-log">log</span></td>
+              <td>Target routing: <code>auto_respond</code> or <code>escalate</code></td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">escalation_reason</span></td>
+              <td><code>Optional[str]</code></td>
+              <td>Initial State (None)</td>
+              <td><span class="node-pill pill-route">route_node</span>, <span class="node-pill pill-guardrails">guardrails_node</span></td>
+              <td><span class="node-pill pill-log">log_decision_node</span></td>
+              <td>Specific audit reason (e.g. <code>low_confidence</code>, <code>guardrail_blocked</code>)</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">escalation_packet</span></td>
+              <td><code>Optional[Dict]</code></td>
+              <td>Initial State (None)</td>
+              <td><span class="node-pill pill-route">route_node</span>, <span class="node-pill pill-guardrails">guardrails_node</span></td>
+              <td>Tier-2 Human Handover</td>
+              <td>Contextual package with problem summary, attempted docs, and reason</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">generated_response</span></td>
+              <td><code>Optional[str]</code></td>
+              <td>Initial State (None)</td>
+              <td><span class="node-pill pill-generate">generate_node</span>, <span class="node-pill pill-guardrails">guardrails_node</span></td>
+              <td><span class="node-pill pill-guardrails">guardrails</span>, Customer Delivery</td>
+              <td>Grounded drafted resolution with [DOC-ID] citations (suppressed on block)</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">cited_doc_ids</span></td>
+              <td><code>List[str]</code></td>
+              <td>Initial State ([])</td>
+              <td><span class="node-pill pill-generate">generate_node</span></td>
+              <td><span class="node-pill pill-guardrails">guardrails</span>, <span class="node-pill pill-log">log</span></td>
+              <td>Extracted citations in <code>[DOC-ID]</code> format</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">guardrail_passed</span></td>
+              <td><code>bool</code></td>
+              <td>Initial State (True)</td>
+              <td><span class="node-pill pill-guardrails">guardrails_node</span></td>
+              <td><span class="node-pill pill-log">log_decision_node</span></td>
+              <td>True if all 5 pre-release safety checks passed</td>
+            </tr>
+            <tr>
+              <td><span class="var-badge">decision_id</span></td>
+              <td><code>str</code></td>
+              <td>Initial State ("")</td>
+              <td><span class="node-pill pill-log">log_decision_node</span></td>
+              <td>API / Caller Response</td>
+              <td>SQLite primary key (e.g. <code>DEC-E48F1A29B0</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB 3: INTERACTIVE NODE-BY-NODE SIMULATOR -->
+    <section id="tab-simulator" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">🧪 Interactive Pipeline Execution Simulator</h2>
+            <p class="card-subtitle">Select a real-world scenario to simulate its journey through each node of the LangGraph pipeline, inspecting exact node inputs, outputs, and state deltas.</p>
+          </div>
+        </div>
+
+        <!-- Scenario Selector -->
+        <div class="sim-scenarios">
+          <button class="scenario-btn active" onclick="loadScenario('happy_path')">
+            🟢 Scenario 1: Happy Path Auto-Respond (MFA Token Reset)
+          </button>
+          <button class="scenario-btn" onclick="loadScenario('low_confidence')">
+            🟡 Scenario 2: Low Confidence Escalation (API Permissions Ambiguity)
+          </button>
+          <button class="scenario-btn" onclick="loadScenario('security_incident')">
+            🔴 Scenario 3: High-Risk Security Incident (Leaked Credentials)
+          </button>
+          <button class="scenario-btn" onclick="loadScenario('guardrail_block')">
+            🛡️ Scenario 4: Pre-Release Guardrail Block (PII Secret Leak)
+          </button>
+        </div>
+
+        <!-- Scenario Banner -->
+        <div id="scenario-banner" class="banner-auto">
+          Route Decision: <strong>AUTO_RESPOND</strong> — High confidence, relevant documentation found, safety guardrails passed.
+        </div>
+
+        <!-- Pipeline Step Navigator -->
+        <div class="sim-pipeline">
+          <div class="sim-node-step active" id="step-btn-retrieve" onclick="selectStep('retrieve')">
+            <div class="step-title">1. retrieve</div>
+            <div class="step-sub">Chroma Vector Search</div>
+          </div>
+          <div class="pipeline-arrow">&rarr;</div>
+
+          <div class="sim-node-step" id="step-btn-classify" onclick="selectStep('classify')">
+            <div class="step-title">2. classify</div>
+            <div class="step-sub">LLM Taxonomy & Urgency</div>
+          </div>
+          <div class="pipeline-arrow">&rarr;</div>
+
+          <div class="sim-node-step" id="step-btn-route" onclick="selectStep('route')">
+            <div class="step-title">3. route</div>
+            <div class="step-sub">Policy & Threshold Rules</div>
+          </div>
+          <div class="pipeline-arrow">&rarr;</div>
+
+          <div class="sim-node-step" id="step-btn-generate" onclick="selectStep('generate')">
+            <div class="step-title">4. generate</div>
+            <div class="step-sub">Grounded Citation Drafting</div>
+          </div>
+          <div class="pipeline-arrow">&rarr;</div>
+
+          <div class="sim-node-step" id="step-btn-guardrails" onclick="selectStep('guardrails')">
+            <div class="step-title">5. guardrails</div>
+            <div class="step-sub">Pre-Release Safety Gate</div>
+          </div>
+          <div class="pipeline-arrow">&rarr;</div>
+
+          <div class="sim-node-step" id="step-btn-log" onclick="selectStep('log')">
+            <div class="step-title">6. log</div>
+            <div class="step-sub">SQLite Decision Audit</div>
+          </div>
+        </div>
+
+        <!-- Node Inspection Panes -->
+        <div class="sim-details">
+          <!-- Left: Node Input State -->
+          <div class="sim-pane">
+            <div class="sim-pane-title">
+              <span>📥 State Passed Into Node</span>
+              <span style="color: var(--text-muted); font-size: 0.8rem;" id="sim-input-node-name">retrieve_node</span>
+            </div>
+            <pre id="sim-input-json">// Loading state...</pre>
+          </div>
+
+          <!-- Right: Node Output Delta -->
+          <div class="sim-pane">
+            <div class="sim-pane-title">
+              <span>📤 State Delta Returned by Node</span>
+              <span class="delta-tag" id="sim-delta-badge">+3 fields</span>
+            </div>
+            <pre id="sim-delta-json">// Loading delta...</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // Tab Switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+      event.currentTarget.classList.add('active');
+      document.getElementById('tab-' + tabId).classList.add('active');
+    }
+
+    // SIMULATOR DATA DEFINITIONS
+    const SCENARIOS = {
+      happy_path: {
+        bannerClass: "banner-auto",
+        bannerHtml: "Route Decision: <strong>AUTO_RESPOND</strong> &mdash; Confidence 0.94 &ge; 0.80, authoritative doc DOC-AUTH-002 found, guardrails verified.",
+        steps: {
+          retrieve: {
+            name: "retrieve_node (src/retrieve.py)",
+            input: {
+              ticket_id: "TICK-1001",
+              channel: "chat",
+              customer_name: "David Miller",
+              customer_tier: "standard",
+              clean_text: "How do I reset my MFA after changing my phone?",
+              retrieved_passages: [],
+              has_relevant_docs: false
+            },
+            delta: {
+              retrieved_passages: [
+                {
+                  doc_id: "DOC-AUTH-002",
+                  title: "Multi-factor authentication setup and recovery",
+                  score: 0.4852,
+                  snippet: "If the device is lost, the user should sign in with one of their recovery codes and then re-enrol a new device from the security page..."
+                }
+              ],
+              top_score: 0.4852,
+              has_relevant_docs: true,
+              retrieval_error: null
+            }
+          },
+          classify: {
+            name: "classify_node (src/classify.py)",
+            input: {
+              ticket_id: "TICK-1001",
+              clean_text: "How do I reset my MFA after changing my phone?",
+              customer_tier: "standard",
+              channel: "chat",
+              retrieved_passages: ["DOC-AUTH-002 (score: 0.4852)"]
+            },
+            delta: {
+              intent: "account_access",
+              urgency: "medium",
+              classification_confidence: 0.94,
+              classification_alternatives: [
+                { intent: "authentication_failure", confidence: 0.06 }
+              ],
+              classification_reasoning: "Customer requesting MFA device reset procedure after changing personal phone."
+            }
+          },
+          route: {
+            name: "route_node (src/route.py)",
+            input: {
+              intent: "account_access",
+              urgency: "medium",
+              classification_confidence: 0.94,
+              has_relevant_docs: true,
+              customer_tier: "standard",
+              must_not_auto_respond: false,
+              kill_switch: false
+            },
+            delta: {
+              route: "auto_respond",
+              escalation_reason: null,
+              policy_flags: ["ROUTED_FOR_AUTONOMOUS_RESOLUTION"],
+              escalation_packet: null
+            }
+          },
+          generate: {
+            name: "generate_node (src/generate.py)",
+            input: {
+              route: "auto_respond",
+              customer_name: "David Miller",
+              clean_text: "How do I reset my MFA after changing my phone?",
+              retrieved_passages: ["DOC-AUTH-002: Multi-factor authentication setup and recovery"]
+            },
+            delta: {
+              generated_response: "Hello David,\n\nTo reset your multi-factor authentication after changing your phone, please follow the recovery procedure in [DOC-AUTH-002]:\n\n1. Sign in to the console using one of your emergency recovery codes [DOC-AUTH-002].\n2. Navigate to the Security Settings page and click 'Re-enrol Authenticator' [DOC-AUTH-002].\n3. Scan the new QR code with your new device.\n\nIf you do not have recovery codes, your account administrator can reset MFA for you from the Team Members page [DOC-AUTH-002].\n\nBest regards,\nCloudServe Support",
+              cited_doc_ids: ["DOC-AUTH-002"],
+              auto_respond_summary: "Automated response generated for intent 'account_access' with 0.95 confidence citing 1 authoritative document(s) [DOC-AUTH-002].",
+              generation_confidence: 0.95,
+              missing_information: false
+            }
+          },
+          guardrails: {
+            name: "guardrails_node (src/guardrails.py)",
+            input: {
+              route: "auto_respond",
+              generated_response: "Hello David, ... [DOC-AUTH-002] ...",
+              cited_doc_ids: ["DOC-AUTH-002"],
+              retrieved_passages: ["DOC-AUTH-002"]
+            },
+            delta: {
+              guardrail_passed: true,
+              guardrail_blocked: false,
+              guardrail_block_reason: null,
+              guardrail_results: {
+                pii: "pass",
+                grounding: "pass",
+                citation: "pass",
+                instruction_integrity: "pass",
+                commitments: "pass",
+                confidence_floor: "pass"
+              }
+            }
+          },
+          log: {
+            name: "log_decision_node (src/logging_store.py)",
+            input: {
+              ticket_id: "TICK-1001",
+              route: "auto_respond",
+              intent: "account_access",
+              confidence: 0.94,
+              guardrail_passed: true,
+              sources_used: ["DOC-AUTH-002"]
+            },
+            delta: {
+              decision_id: "DEC-B491CF7E01",
+              reason: "Automated response generated for intent 'account_access' with 0.95 confidence citing 1 authoritative document(s) [DOC-AUTH-002].",
+              logged_to_audit_store: true
+            }
+          }
+        }
+      },
+
+      low_confidence: {
+        bannerClass: "banner-escalation",
+        bannerHtml: "Route Decision: <strong>ESCALATE</strong> &mdash; Classification confidence 0.72 &lt; 0.80 threshold. Packaged into Tier-2 Escalation Packet; Generation skipped.",
+        steps: {
+          retrieve: {
+            name: "retrieve_node (src/retrieve.py)",
+            input: {
+              ticket_id: "TICK-1002",
+              channel: "chat",
+              customer_name: "Kavya Patel",
+              customer_tier: "business",
+              clean_text: "Our access keys work for read endpoints but fail on writes without permission errors.",
+              retrieved_passages: []
+            },
+            delta: {
+              retrieved_passages: [
+                {
+                  doc_id: "DOC-AUTH-004",
+                  title: "API key rotation and scope management",
+                  score: 0.4210,
+                  snippet: "Review the scopes attached to the key. Read-only keys cannot write, and project-scoped keys cannot reach organisation endpoints..."
+                }
+              ],
+              top_score: 0.4210,
+              has_relevant_docs: true
+            }
+          },
+          classify: {
+            name: "classify_node (src/classify.py)",
+            input: {
+              ticket_id: "TICK-1002",
+              clean_text: "Our access keys work for read endpoints but fail on writes without permission errors."
+            },
+            delta: {
+              intent: "api_key_issue",
+              urgency: "medium",
+              classification_confidence: 0.72,
+              classification_alternatives: [
+                { intent: "api_usage_question", confidence: 0.28 }
+              ],
+              classification_reasoning: "Ambiguous whether key scope is restricted or user has malformed write request."
+            }
+          },
+          route: {
+            name: "route_node (src/route.py)",
+            input: {
+              intent: "api_key_issue",
+              classification_confidence: 0.72,
+              has_relevant_docs: true,
+              threshold: 0.80
+            },
+            delta: {
+              route: "escalate",
+              escalation_reason: "low_confidence",
+              policy_flags: ["CONFIDENCE_BELOW_THRESHOLD"],
+              escalation_packet: {
+                ticket_id: "TICK-1002",
+                escalation_reason: "low_confidence",
+                intent: "api_key_issue",
+                confidence: 0.72,
+                issue_summary: "Ambiguous whether key scope is restricted or user has malformed write request.",
+                attempted_retrieval: [
+                  { doc_id: "DOC-AUTH-004", score: 0.421, title: "API key rotation and scope management" }
+                ],
+                handover_notes: "Classifier confidence (0.72) below threshold (0.80). Human verification required before advising customer. | Issue Analysis: Ambiguous whether key scope is restricted or user has malformed write request."
+              }
+            }
+          },
+          generate: {
+            name: "generate_node (src/generate.py) [BYPASSED]",
+            input: {
+              route: "escalate"
+            },
+            delta: {
+              generated_response: null,
+              cited_doc_ids: [],
+              cannot_answer_reason: "Ticket was routed for human escalation."
+            }
+          },
+          guardrails: {
+            name: "guardrails_node (src/guardrails.py) [PASSTHROUGH]",
+            input: {
+              route: "escalate",
+              generated_response: null
+            },
+            delta: {
+              guardrail_passed: true,
+              guardrail_blocked: false
+            }
+          },
+          log: {
+            name: "log_decision_node (src/logging_store.py)",
+            input: {
+              ticket_id: "TICK-1002",
+              route: "escalate",
+              escalation_reason: "low_confidence",
+              action_taken: "escalate"
+            },
+            delta: {
+              decision_id: "DEC-E78921AA04",
+              reason: "Classifier confidence (0.72) below threshold (0.80). Human verification required before advising customer. | Issue Analysis: Ambiguous whether key scope is restricted or user has malformed write request.",
+              logged_to_audit_store: true
+            }
+          }
+        }
+      },
+
+      security_incident: {
+        bannerClass: "banner-escalation",
+        bannerHtml: "Route Decision: <strong>ESCALATE</strong> &mdash; High-risk intent detected (security_incident). Strict zero-automation policy enforced.",
+        steps: {
+          retrieve: {
+            name: "retrieve_node (src/retrieve.py)",
+            input: { ticket_id: "TICK-1003", clean_text: "We suspect our admin API credentials were leaked on GitHub publicly." },
+            delta: { retrieved_passages: [{ doc_id: "DOC-SEC-002", title: "Security Incident Response", score: 0.51 }], has_relevant_docs: true }
+          },
+          classify: {
+            name: "classify_node (src/classify.py)",
+            input: { ticket_id: "TICK-1003", clean_text: "We suspect our admin API credentials were leaked on GitHub publicly." },
+            delta: { intent: "security_incident", urgency: "high", classification_confidence: 0.98, classification_reasoning: "Customer explicitly reported public credential exposure." }
+          },
+          route: {
+            name: "route_node (src/route.py)",
+            input: { intent: "security_incident", urgency: "high", confidence: 0.98 },
+            delta: {
+              route: "escalate",
+              escalation_reason: "high_risk_intent",
+              policy_flags: ["HIGH_RISK_INTENT_SECURITY_INCIDENT"],
+              escalation_packet: {
+                ticket_id: "TICK-1003",
+                escalation_reason: "high_risk_intent",
+                issue_summary: "Customer explicitly reported public credential exposure.",
+                handover_notes: "High-risk intent detected ('security_incident'). Policy strictly prohibits automated response. Fast-tracking to Security Response Team. | Issue Analysis: Customer explicitly reported public credential exposure."
+              }
+            }
+          },
+          generate: {
+            name: "generate_node (src/generate.py) [BYPASSED]",
+            input: { route: "escalate" },
+            delta: { generated_response: null }
+          },
+          guardrails: {
+            name: "guardrails_node (src/guardrails.py) [PASSTHROUGH]",
+            input: { route: "escalate" },
+            delta: { guardrail_passed: true }
+          },
+          log: {
+            name: "log_decision_node (src/logging_store.py)",
+            input: { ticket_id: "TICK-1003", route: "escalate", action_taken: "escalate", intent: "security_incident" },
+            delta: {
+              decision_id: "DEC-SEC-990141",
+              reason: "High-risk intent detected ('security_incident'). Policy strictly prohibits automated response. Fast-tracking to Security Response Team. | Issue Analysis: Customer explicitly reported public credential exposure.",
+              logged_to_audit_store: true
+            }
+          }
+        }
+      },
+
+      guardrail_block: {
+        bannerClass: "banner-escalation",
+        bannerHtml: "Route Decision: <strong>BLOCK &amp; ESCALATE</strong> &mdash; Draft response contained leaked credential. Guardrails suppressed response and diverted ticket to human engineer.",
+        steps: {
+          retrieve: {
+            name: "retrieve_node (src/retrieve.py)",
+            input: { ticket_id: "TICK-1004", clean_text: "How do I test my authentication header?" },
+            delta: { retrieved_passages: [{ doc_id: "DOC-AUTH-001", title: "Resolving invalid credential errors", score: 0.44 }], has_relevant_docs: true }
+          },
+          classify: {
+            name: "classify_node (src/classify.py)",
+            input: { ticket_id: "TICK-1004" },
+            delta: { intent: "authentication_failure", urgency: "medium", classification_confidence: 0.91 }
+          },
+          route: {
+            name: "route_node (src/route.py)",
+            input: { intent: "authentication_failure", confidence: 0.91, has_relevant_docs: true },
+            delta: { route: "auto_respond", policy_flags: ["ROUTED_FOR_AUTONOMOUS_RESOLUTION"] }
+          },
+          generate: {
+            name: "generate_node (src/generate.py)",
+            input: { route: "auto_respond", clean_text: "How do I test my authentication header?" },
+            delta: {
+              generated_response: "You can test using this temporary token: Bearer sk-live_99814188200192938491823901928391283 [DOC-AUTH-001].",
+              cited_doc_ids: ["DOC-AUTH-001"]
+            }
+          },
+          guardrails: {
+            name: "guardrails_node (src/guardrails.py) [FIRED!]",
+            input: { generated_response: "You can test using this temporary token: Bearer sk-live_998141..." },
+            delta: {
+              route: "escalate",
+              escalation_reason: "guardrail_blocked",
+              guardrail_passed: false,
+              guardrail_blocked: true,
+              guardrail_block_reason: "Leaked API key or Bearer token detected in response",
+              generated_response: null,
+              escalation_packet: {
+                ticket_id: "TICK-1004",
+                escalation_reason: "guardrail_blocked",
+                violations: ["Leaked API key or Bearer token detected in response"],
+                handover_notes: "Response suppressed by PII guardrail. Diverted to human engineer."
+              }
+            }
+          },
+          log: {
+            name: "log_decision_node (src/logging_store.py)",
+            input: { ticket_id: "TICK-1004", route: "escalate", guardrail_blocked: true },
+            delta: { decision_id: "DEC-GUARD-FAIL01", logged_to_audit_store: true }
+          }
+        }
+      }
+    };
+
+    let currentScenario = 'happy_path';
+    let currentStep = 'retrieve';
+
+    function loadScenario(scenKey) {
+      currentScenario = scenKey;
+      document.querySelectorAll('.scenario-btn').forEach(btn => btn.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+
+      const scen = SCENARIOS[scenKey];
+      const banner = document.getElementById('scenario-banner');
+      banner.className = scen.bannerClass;
+      banner.innerHTML = scen.bannerHtml;
+
+      // Update step visual styling (e.g. skipped nodes in escalation)
+      const isEscalateAtRoute = (scenKey === 'low_confidence' || scenKey === 'security_incident');
+      document.getElementById('step-btn-generate').className = isEscalateAtRoute ? 'sim-node-step skipped' : 'sim-node-step';
+      document.getElementById('step-btn-guardrails').className = isEscalateAtRoute ? 'sim-node-step skipped' : 'sim-node-step';
+
+      selectStep('retrieve');
+    }
+
+    function selectStep(stepKey) {
+      currentStep = stepKey;
+      document.querySelectorAll('.sim-node-step').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.getElementById('step-btn-' + stepKey);
+      if (activeBtn) activeBtn.classList.add('active');
+
+      const stepData = SCENARIOS[currentScenario].steps[stepKey];
+      document.getElementById('sim-input-node-name').textContent = stepData.name;
+      document.getElementById('sim-input-json').textContent = JSON.stringify(stepData.input, null, 2);
+      document.getElementById('sim-delta-json').textContent = JSON.stringify(stepData.delta, null, 2);
+
+      const deltaKeys = Object.keys(stepData.delta).length;
+      document.getElementById('sim-delta-badge').textContent = `+${deltaKeys} fields updated`;
+    }
+
+    // Initialize Simulator
+    window.addEventListener('DOMContentLoaded', () => {
+      selectStep('retrieve');
+    });
+  </script>
+</body>
+</html>

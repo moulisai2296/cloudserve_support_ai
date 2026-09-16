@@ -1,0 +1,31 @@
+[project]
+name = "capstone-pack"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "black>=26.5.1",
+    "chromadb>=1.5.9",
+    "fastapi>=0.141.1",
+    "flake8>=7.3.0",
+    "langchain>=1.4.0",
+    "langchain-community>=0.4.2",
+    "langchain-openai>=1.6.2",
+    "langgraph>=1.2.11",
+    "numpy>=2.5.3",
+    "pandas>=3.0.5",
+    "pydantic>=2.13.5",
+    "pytest>=9.1.1",
+    "python-dotenv>=1.2.3",
+    "pyyaml>=6.0.3",
+    "scikit-learn>=1.9.0",
+    "sentence-transformers>=6.0.1",
+    "tqdm>=4.70.0",
+    "uvicorn>=0.52.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
