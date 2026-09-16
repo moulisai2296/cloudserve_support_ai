@@ -9,7 +9,6 @@ from src.retrieve import (
     retrieve_passages,
     retrieve_node,
     create_retrieval_graph,
-    SupportState
 )
 
 TEST_CHROMA_PATH = "./storage/test_chroma"

@@ -84,6 +84,21 @@ class Passage(TypedDict):
     chunk_id: str
 
 
+class SupportState(TypedDict, total=False):
+    """Workflow state for retrieval node and retrieval StateGraph."""
+    ticket_id: str
+    clean_text: str
+    body: str
+    subject: str
+    chroma_path: str
+    retrieval_threshold: float
+    retrieval_top_k: int
+    retrieved_passages: List[Dict[str, Any]]
+    top_score: float
+    has_relevant_docs: bool
+    retrieval_error: Optional[str]
+
+
 
 
 
