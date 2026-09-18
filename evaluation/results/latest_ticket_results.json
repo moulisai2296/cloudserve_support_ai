@@ -1,0 +1,328 @@
+{
+  "timestamp": "2026-09-16T16:25:04.123558+00:00",
+  "dataset": "data/development_tickets.json",
+  "total_tickets": 5,
+  "auto_responded_count": 3,
+  "escalated_count": 2,
+  "tickets": [
+    {
+      "ticket_id": "DEV-0001",
+      "customer_id": "CUST-1131",
+      "customer_tier": "standard",
+      "language_fluency": "non_fluent",
+      "channel": "chat",
+      "subject": "",
+      "body": "builds that work last week are now fail during dependency resolution. we are having not change our code at all.",
+      "clean_text": "builds that work last week are now fail during dependency resolution. we are having not change our code at all.",
+      "ground_truth_labels": {
+        "intent": "deployment_failure",
+        "urgency": "high",
+        "expected_route": "auto_respond",
+        "expected_doc_ids": [
+          "DOC-DEPLOY-001"
+        ]
+      },
+      "execution": {
+        "latency_seconds": 7.35,
+        "predicted_intent": "deployment_failure",
+        "classification_confidence": 0.85,
+        "intent_match": true,
+        "predicted_urgency": "medium",
+        "urgency_reason": "Heuristic keyword fallback matching.",
+        "urgency_match": false,
+        "route_decision": "auto_respond",
+        "route_match": true,
+        "routing_rule_matched": "ROUTED_FOR_AUTONOMOUS_RESOLUTION",
+        "escalation_reason": null,
+        "escalation_packet": null,
+        "retrieved_passages_count": 3,
+        "retrieved_doc_ids": [
+          "DOC-DEPLOY-003",
+          "DOC-DEPLOY-003",
+          "DOC-ONB-001"
+        ],
+        "cited_doc_ids": [
+          "DOC-DEPLOY-003"
+        ],
+        "valid_citations": [
+          "DOC-DEPLOY-003"
+        ],
+        "citations_accurate": true,
+        "generated_response": "Hello Xin Kulkarni,\n\nBased on our official documentation [DOC-DEPLOY-003] (Build failures caused by dependency resolution), here is the relevant guidance to resolve your issue:\n\nTitle: Build failures caused by dependency resolution [DOC-DEPLOY-003]\n\nPlease refer to [DOC-DEPLOY-003] for the complete resolution procedure.\n\nBest regards,\nCloudServe Support",
+        "guardrail_passed": true,
+        "guardrail_block_reason": null,
+        "final_response_text": "Hello Xin Kulkarni,\n\nBased on our official documentation [DOC-DEPLOY-003] (Build failures caused by dependency resolution), here is the relevant guidance to resolve your issue:\n\nTitle: Build failures caused by dependency resolution [DOC-DEPLOY-003]\n\nPlease refer to [DOC-DEPLOY-003] for the complete resolution procedure.\n\nBest regards,\nCloudServe Support",
+        "logged_to_audit_store": true,
+        "error": null
+      }
+    },
+    {
+      "ticket_id": "DEV-0002",
+      "customer_id": "CUST-1251",
+      "customer_tier": "business",
+      "language_fluency": "fluent",
+      "channel": "chat",
+      "subject": "",
+      "body": "One of our production keys started returning 401 at around yesterday morning without any change on our side. Other keys against the same account are still working.",
+      "clean_text": "One of our production keys started returning 401 at around yesterday morning without any change on our side. Other keys against the same account are still working.",
+      "ground_truth_labels": {
+        "intent": "api_key_issue",
+        "urgency": "medium",
+        "expected_route": "escalate",
+        "expected_doc_ids": []
+      },
+      "execution": {
+        "latency_seconds": 0.024,
+        "predicted_intent": "api_key_issue",
+        "classification_confidence": 0.85,
+        "intent_match": true,
+        "predicted_urgency": "high",
+        "urgency_reason": "Heuristic keyword fallback matching.",
+        "urgency_match": false,
+        "route_decision": "auto_respond",
+        "route_match": false,
+        "routing_rule_matched": "ROUTED_FOR_AUTONOMOUS_RESOLUTION",
+        "escalation_reason": null,
+        "escalation_packet": null,
+        "retrieved_passages_count": 3,
+        "retrieved_doc_ids": [
+          "DOC-AUTH-004",
+          "DOC-AUTH-004",
+          "DOC-SEC-002"
+        ],
+        "cited_doc_ids": [
+          "DOC-AUTH-004"
+        ],
+        "valid_citations": [
+          "DOC-AUTH-004"
+        ],
+        "citations_accurate": true,
+        "generated_response": "Hello Kavya Patel,\n\nBased on our official documentation [DOC-AUTH-004] (API key rotation and scope management), here is the relevant guidance to resolve your issue:\n\nTitle: API key rotation and scope management [DOC-AUTH-004]\n\nPlease refer to [DOC-AUTH-004] for the complete resolution procedure.\n\nBest regards,\nCloudServe Support",
+        "guardrail_passed": true,
+        "guardrail_block_reason": null,
+        "final_response_text": "Hello Kavya Patel,\n\nBased on our official documentation [DOC-AUTH-004] (API key rotation and scope management), here is the relevant guidance to resolve your issue:\n\nTitle: API key rotation and scope management [DOC-AUTH-004]\n\nPlease refer to [DOC-AUTH-004] for the complete resolution procedure.\n\nBest regards,\nCloudServe Support",
+        "logged_to_audit_store": true,
+        "error": null
+      }
+    },
+    {
+      "ticket_id": "DEV-0003",
+      "customer_id": "CUST-1001",
+      "customer_tier": "enterprise",
+      "language_fluency": "fluent",
+      "channel": "docs_comment",
+      "subject": "Evidence for a compliance review",
+      "body": "Our auditor has asked for access records covering the last six months. Can I export these, and is that period within what you retain?",
+      "clean_text": "Evidence for a compliance review\nOur auditor has asked for access records covering the last six months. Can I export these, and is that period within what you retain?",
+      "ground_truth_labels": {
+        "intent": "compliance_request",
+        "urgency": "medium",
+        "expected_route": "escalate",
+        "expected_doc_ids": [
+          "DOC-SEC-003"
+        ]
+      },
+      "execution": {
+        "latency_seconds": 0.022,
+        "predicted_intent": "compliance_request",
+        "classification_confidence": 0.85,
+        "intent_match": true,
+        "predicted_urgency": "medium",
+        "urgency_reason": "Heuristic keyword fallback matching.",
+        "urgency_match": true,
+        "route_decision": "escalate",
+        "route_match": true,
+        "routing_rule_matched": "HIGH_RISK_INTENT_COMPLIANCE_REQUEST",
+        "escalation_reason": "high_risk_intent",
+        "escalation_packet": {
+          "ticket_id": "DEV-0003",
+          "escalation_reason": "high_risk_intent",
+          "policy_flags": [
+            "HIGH_RISK_INTENT_COMPLIANCE_REQUEST"
+          ],
+          "intent": "compliance_request",
+          "urgency": "medium",
+          "confidence": 0.85,
+          "customer_context": {
+            "customer_id": "CUST-1001",
+            "customer_name": "Sanjay Demir",
+            "customer_tier": "enterprise",
+            "customer_region": "asia_pacific",
+            "channel": "docs_comment"
+          },
+          "attempted_retrieval": [
+            {
+              "doc_id": "DOC-SEC-003",
+              "title": "Audit logging and compliance evidence",
+              "score": 0.6746,
+              "snippet": "Title: Audit logging and compliance evidence\n\n## Resolution\n\n1. Filter the audit log by actor, resource and date range. Every administrative action carries the user, the address and the outcome.\n2. Ex..."
+            },
+            {
+              "doc_id": "DOC-DATA-001",
+              "title": "Exporting account data and scheduled extracts",
+              "score": 0.6214,
+              "snippet": "Title: Exporting account data and scheduled extracts\n\n## Resolution\n\n1. Check the exports page for job status. Jobs covering more than a million records commonly take several minutes.\n2. Request a fre..."
+            },
+            {
+              "doc_id": "DOC-SEC-003",
+              "title": "Audit logging and compliance evidence",
+              "score": 0.5283,
+              "snippet": "Title: Audit logging and compliance evidence\n\n# Audit logging and compliance evidence\n\n**Applies to:** Business and Enterprise plans\n\n## Symptoms\n\n- An auditor has requested access records\n- An event ..."
+            }
+          ],
+          "issue_summary": "Heuristic keyword fallback matching.",
+          "handover_notes": "High-risk intent detected ('compliance_request'). Policy strictly prohibits automated response. | Issue Analysis: Heuristic keyword fallback matching."
+        },
+        "retrieved_passages_count": 3,
+        "retrieved_doc_ids": [
+          "DOC-SEC-003",
+          "DOC-DATA-001",
+          "DOC-SEC-003"
+        ],
+        "cited_doc_ids": [],
+        "valid_citations": [],
+        "citations_accurate": true,
+        "generated_response": null,
+        "guardrail_passed": true,
+        "guardrail_block_reason": null,
+        "final_response_text": null,
+        "logged_to_audit_store": true,
+        "error": null
+      }
+    },
+    {
+      "ticket_id": "DEV-0004",
+      "customer_id": "CUST-1059",
+      "customer_tier": "business",
+      "language_fluency": "non_fluent",
+      "channel": "chat",
+      "subject": "",
+      "body": "how do I revert to earlier revision? release we put out this morning is causing errors and I better i roll back than try to fix forward. please tell what to do.",
+      "clean_text": "how do I revert to earlier revision? release we put out this morning is causing errors and I better i roll back than try to fix forward. please tell what to do.",
+      "ground_truth_labels": {
+        "intent": "rollback_request",
+        "urgency": "high",
+        "expected_route": "auto_respond",
+        "expected_doc_ids": [
+          "DOC-DEPLOY-002"
+        ]
+      },
+      "execution": {
+        "latency_seconds": 0.024,
+        "predicted_intent": "rollback_request",
+        "classification_confidence": 0.85,
+        "intent_match": true,
+        "predicted_urgency": "medium",
+        "urgency_reason": "Heuristic keyword fallback matching.",
+        "urgency_match": false,
+        "route_decision": "auto_respond",
+        "route_match": true,
+        "routing_rule_matched": "ROUTED_FOR_AUTONOMOUS_RESOLUTION",
+        "escalation_reason": null,
+        "escalation_packet": null,
+        "retrieved_passages_count": 3,
+        "retrieved_doc_ids": [
+          "DOC-DEPLOY-002",
+          "DOC-DEPLOY-002",
+          "DOC-DEPLOY-003"
+        ],
+        "cited_doc_ids": [
+          "DOC-DEPLOY-002"
+        ],
+        "valid_citations": [
+          "DOC-DEPLOY-002"
+        ],
+        "citations_accurate": true,
+        "generated_response": "Hello Yusuf Demir,\n\nBased on our official documentation [DOC-DEPLOY-002] (Rolling back a failed release), here is the relevant guidance to resolve your issue:\n\nTitle: Rolling back a failed release [DOC-DEPLOY-002]\n\nPlease refer to [DOC-DEPLOY-002] for the complete resolution procedure.\n\nBest regards,\nCloudServe Support",
+        "guardrail_passed": true,
+        "guardrail_block_reason": null,
+        "final_response_text": "Hello Yusuf Demir,\n\nBased on our official documentation [DOC-DEPLOY-002] (Rolling back a failed release), here is the relevant guidance to resolve your issue:\n\nTitle: Rolling back a failed release [DOC-DEPLOY-002]\n\nPlease refer to [DOC-DEPLOY-002] for the complete resolution procedure.\n\nBest regards,\nCloudServe Support",
+        "logged_to_audit_store": true,
+        "error": null
+      }
+    },
+    {
+      "ticket_id": "DEV-0005",
+      "customer_id": "CUST-1059",
+      "customer_tier": "business",
+      "language_fluency": "fluent",
+      "channel": "email",
+      "subject": "Please add per-project spend caps",
+      "body": "It would be very useful to set spend caps per project rather than only for the whole organisation. At the moment one team's overspend affects everyone.",
+      "clean_text": "Please add per-project spend caps\nIt would be very useful to set spend caps per project rather than only for the whole organisation. At the moment one team's overspend affects everyone.",
+      "ground_truth_labels": {
+        "intent": "feature_request",
+        "urgency": "medium",
+        "expected_route": "escalate",
+        "expected_doc_ids": []
+      },
+      "execution": {
+        "latency_seconds": 0.025,
+        "predicted_intent": "feature_request",
+        "classification_confidence": 0.85,
+        "intent_match": true,
+        "predicted_urgency": "low",
+        "urgency_reason": "Heuristic keyword fallback matching.",
+        "urgency_match": false,
+        "route_decision": "escalate",
+        "route_match": true,
+        "routing_rule_matched": "MUST_NOT_AUTO_RESPOND_FLAG",
+        "escalation_reason": "high_risk_policy",
+        "escalation_packet": {
+          "ticket_id": "DEV-0005",
+          "escalation_reason": "high_risk_policy",
+          "policy_flags": [
+            "MUST_NOT_AUTO_RESPOND_FLAG"
+          ],
+          "intent": "feature_request",
+          "urgency": "low",
+          "confidence": 0.85,
+          "customer_context": {
+            "customer_id": "CUST-1059",
+            "customer_name": "Xin Dubois",
+            "customer_tier": "business",
+            "customer_region": "north_america",
+            "channel": "email"
+          },
+          "attempted_retrieval": [
+            {
+              "doc_id": "DOC-BILL-003",
+              "title": "Usage limits, overage and spend controls",
+              "score": 0.5254,
+              "snippet": "Title: Usage limits, overage and spend controls\n\n## Resolution\n\n1. Check the current period usage against the plan allowance on the billing page.\n2. Decide deliberately between a hard spend cap, which..."
+            },
+            {
+              "doc_id": "DOC-ACCT-002",
+              "title": "Organisation setup and project structure",
+              "score": 0.5063,
+              "snippet": "Title: Organisation setup and project structure\n\n## Resolution\n\n1. Use a separate project per environment where isolation of configuration and billing matters. Folders within a project share configura..."
+            },
+            {
+              "doc_id": "DOC-ACCT-002",
+              "title": "Organisation setup and project structure",
+              "score": 0.3434,
+              "snippet": "Title: Organisation setup and project structure\n\n# Organisation setup and project structure\n\n**Applies to:** All plans\n\n## Symptoms\n\n- Resources are difficult to separate for billing\n- Environments ar..."
+            }
+          ],
+          "issue_summary": "Heuristic keyword fallback matching.",
+          "handover_notes": "Ticket flagged by policy exclusion rules (must_not_auto_respond). Requires manual action. | Issue Analysis: Heuristic keyword fallback matching."
+        },
+        "retrieved_passages_count": 3,
+        "retrieved_doc_ids": [
+          "DOC-BILL-003",
+          "DOC-ACCT-002",
+          "DOC-ACCT-002"
+        ],
+        "cited_doc_ids": [],
+        "valid_citations": [],
+        "citations_accurate": true,
+        "generated_response": null,
+        "guardrail_passed": true,
+        "guardrail_block_reason": null,
+        "final_response_text": null,
+        "logged_to_audit_store": true,
+        "error": null
+      }
+    }
+  ]
+}
