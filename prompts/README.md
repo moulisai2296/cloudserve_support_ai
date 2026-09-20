@@ -22,6 +22,13 @@ prompts/
 
 ## 2. Prompt Register
 
+Runtime update (20 September 2026): `build/grounding_v1.txt` is retained for
+standalone diagnostics only. The grounding reviewer is disabled in the runtime
+release gate and cannot change routing. Drafts checked by that gate record
+grounding review as `not_run` with method `disabled`; citation validation remains active.
+The existing PR-03 prompt and offline PR-04 judge below remain uninvoked templates;
+independent human evaluation remains separate.
+
 | Prompt ID | File Path | Category | Serves PRD | Version | Model | Primary Output Schema | Key Injection Defenses |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **PR-01** | `build/classify_v1.txt` | Build | `FR-02`, `FR-05` | 1.0 | `llama-3.1-8b-instruct` | JSON (`intent`, `urgency`, `confidence`, `alternatives`) | `<ticket_data>` XML isolation, instruction ignoring directive |

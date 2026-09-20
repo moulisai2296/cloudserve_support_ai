@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
+from src.grounding import render_source_excerpt
 
 load_dotenv()
 
@@ -33,7 +34,7 @@ class GenerationResult(BaseModel):
     """Structured container for generated support response and citation metadata."""
     response_text: str
     cited_doc_ids: List[str] = Field(default_factory=list)
-    confidence: float = Field(default=0.90, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     missing_information: bool = False
     cannot_answer_reason: Optional[str] = None
 
@@ -108,18 +109,7 @@ def _heuristic_fallback_generate(
 
     top_doc = passages[0]
     top_id = top_doc.get("doc_id", "DOC-UNKNOWN")
-    top_title = top_doc.get("title", "")
-    content_snippet = top_doc.get("content", "").split("\n\n")[0]
-
-    greeting = f"Hi {customer_name}," if channel == "email" else f"Hello {customer_name},"
-    response_text = (
-        f"{greeting}\n\n"
-        f"Based on our official documentation [{top_id}] ({top_title}), "
-        f"here is the relevant guidance to resolve your issue:\n\n"
-        f"{content_snippet} [{top_id}]\n\n"
-        f"Please refer to [{top_id}] for the complete resolution procedure.\n\n"
-        f"Best regards,\nCloudServe Support"
-    )
+    response_text = render_source_excerpt(passages)
 
     return GenerationResult(
         response_text=response_text,
@@ -179,8 +169,7 @@ def generate_response(
             result = GenerationResult(**parsed)
             # Synchronize citations with actual regex extraction to prevent LLM omissions
             extracted = extract_citations(result.response_text)
-            if extracted and not result.cited_doc_ids:
-                result.cited_doc_ids = extracted
+            result.cited_doc_ids = extracted
             return result
 
         return _heuristic_fallback_generate(

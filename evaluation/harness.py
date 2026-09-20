@@ -1,19 +1,24 @@
 """Standalone evaluation harness for CloudServe Solutions support triage.
 
-Executes unattended batch evaluation across ticket datasets, computing all
-Business Outcomes and Technical Performance metrics,
-including segmented fairness audits across customer tiers and language fluency.
+Executes unattended batch evaluation with measured diagnostics and explicit
+missing-evidence markers for business outcomes and independent quality review.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import Counter, defaultdict
+import math
+import statistics
+from sklearn.metrics import classification_report, confusion_matrix
+import hashlib
 import json
 import logging
 import os
-import statistics
+import re
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,11 +28,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, classification_report
-
-from src.ingest import load_tickets_from_json, NormalizedTicket
+from src.ingest import ingest_ticket, NormalizedTicket
 from src.graph import process_ticket
-from src.logging_store import count_decisions, reconcile_decisions_with_tickets
+from src.logging_store import DecisionRecord, log_decision, reconcile_decisions_with_tickets
 
 # Suppress external library noise (HuggingFace Hub, HTTP requests, progress bars)
 os.environ.setdefault("HF_HUB_VERBOSITY", "error")
@@ -73,552 +76,380 @@ except Exception:
     pass
 
 
-def compute_metrics(
-    processed_results: List[Dict[str, Any]],
-    raw_tickets: List[NormalizedTicket],
-    timings: List[float],
-    reconciliation: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    Computes all evaluation metrics structured into the 4 mandatory Build Specification groups:
-      1. Volume: Tickets processed, answered automatically, escalated, blocked by guardrails.
-      2. Business: First contact resolution, mean and median response time, escalation rate.
-      3. Technical: Classification precision and recall per class, retrieval hit rate, latency at median and 95th percentile.
-      4. Governance: Decisions logged, guardrail activations by type, any private data detections.
-    """
-    total = len(processed_results)
-    if total == 0:
-        return {"error": "No tickets processed"}
-
-    # =========================================================================
-    # Group 1: Volume Calculations
-    # =========================================================================
-    auto_responded_count = sum(1 for r in processed_results if r.get("route") == "auto_respond")
-    escalated_count = sum(1 for r in processed_results if r.get("route") == "escalate")
-    fcr_rate = (auto_responded_count / total) * 100.0
-    escalation_rate = (escalated_count / total) * 100.0
-
-    # Guardrail blocks & activations by type
-    blocked_count = sum(1 for r in processed_results if r.get("guardrail_blocked", False) or not r.get("guardrail_passed", True))
-    guardrail_breakdown = {
-        "pii_leakage": 0,
-        "grounding_or_citation": 0,
-        "prompt_injection": 0,
-        "unauthorized_commitments": 0,
-    }
-    pii_violations = 0
-
-    for r in processed_results:
-        is_blocked = r.get("guardrail_blocked", False) or not r.get("guardrail_passed", True)
-        reason = (r.get("guardrail_block_reason") or "").lower()
-        gr_dict = r.get("guardrail_results") or {}
-
-        if "pii" in reason or gr_dict.get("pii") == "fail":
-            guardrail_breakdown["pii_leakage"] += 1
-            pii_violations += 1
-        if "citation" in reason or "grounding" in reason or gr_dict.get("citation") == "fail" or gr_dict.get("grounding") == "fail":
-            guardrail_breakdown["grounding_or_citation"] += 1
-        if "injection" in reason or "instruction" in reason or gr_dict.get("instruction_integrity") == "fail":
-            guardrail_breakdown["prompt_injection"] += 1
-        if "commitment" in reason or "refund" in reason or gr_dict.get("commitments") == "fail":
-            guardrail_breakdown["unauthorized_commitments"] += 1
-
-    # =========================================================================
-    # Group 2: Business & Latency Calculations
-    # =========================================================================
-    ordered_timings = sorted(timings)
-    mean_latency = statistics.mean(timings) if timings else 0.0
-    median_latency = statistics.median(timings) if timings else 0.0
-    p95_idx = int(0.95 * len(ordered_timings)) - 1 if len(ordered_timings) >= 20 else len(ordered_timings) - 1
-    p95_latency = ordered_timings[max(0, p95_idx)] if ordered_timings else 0.0
-
-    # =========================================================================
-    # Group 3: Technical Performance Calculations
-    # =========================================================================
-    true_intents = []
-    pred_intents = []
-    true_urgencies = []
-    pred_urgencies = []
-
-    valid_citations = 0
-    total_citations_made = 0
-    hallucinated_responses = 0
-
-    retrieval_hits = 0
-    retrieval_evaluable = 0
-
-    tier_segments: Dict[str, Dict[str, Any]] = {}
-    fluency_segments: Dict[str, Dict[str, Any]] = {}
-
-    for norm, res in zip(raw_tickets, processed_results):
-        labels = norm.labels or None
-        t_tier = norm.customer_tier.lower()
-        t_fluency = norm.language_fluency.lower()
-
-        tier_segments.setdefault(t_tier, {"total": 0, "auto": 0, "correct_intent": 0})
-        fluency_segments.setdefault(t_fluency, {"total": 0, "auto": 0, "correct_intent": 0})
-
-        tier_segments[t_tier]["total"] += 1
-        fluency_segments[t_fluency]["total"] += 1
-
-        if res.get("route") == "auto_respond":
-            tier_segments[t_tier]["auto"] += 1
-            fluency_segments[t_fluency]["auto"] += 1
-
-        pred_intent = res.get("intent", "unclear_request")
-        pred_urgency = res.get("urgency", "medium")
-        route_decision = res.get("route", "escalate")
-
-        if labels:
-            if labels.intent:
-                true_intents.append(labels.intent)
-                pred_intents.append(pred_intent)
-                if pred_intent == labels.intent:
-                    tier_segments[t_tier]["correct_intent"] += 1
-                    fluency_segments[t_fluency]["correct_intent"] += 1
-
-            if labels.urgency:
-                true_urgencies.append(labels.urgency)
-                pred_urgencies.append(pred_urgency)
+# Metric calculation and console reporting are kept inline for the standalone harness.
+def percent(numerator, denominator):
+    return round(100 * numerator / denominator, 2) if denominator else None
 
 
-            # Retrieval hit rate: check if expected docs were retrieved
-            expected_docs = labels.expected_doc_ids or []
-            if expected_docs:
-                retrieval_evaluable += 1
-                retrieved_ids = [p.get("doc_id") for p in res.get("retrieved_passages", [])]
-                if any(doc in retrieved_ids for doc in expected_docs):
-                    retrieval_hits += 1
-
-        # Citation Accuracy & Hallucination checks
-        cited = res.get("cited_doc_ids", [])
-        retrieved_docs = {p.get("doc_id") for p in res.get("retrieved_passages", [])}
-        expected_docs_set = set(labels.expected_doc_ids) if (labels and labels.expected_doc_ids) else set()
-
-        if route_decision == "auto_respond" and res.get("generated_response"):
-            total_citations_made += len(cited)
-            valid_for_this = sum(1 for c in cited if c in retrieved_docs)
-            valid_citations += valid_for_this
-
-            if any(c not in retrieved_docs for c in cited) or (expected_docs_set and not (set(cited) & expected_docs_set)):
-                hallucinated_responses += 1
-
-    # Intent Precision & Recall per class and overall
-    per_class_classification: Dict[str, Any] = {}
-    if true_intents and pred_intents:
-        intent_accuracy = accuracy_score(true_intents, pred_intents) * 100.0
-        intent_precision = precision_score(true_intents, pred_intents, average="weighted", zero_division=0) * 100.0
-        intent_recall = recall_score(true_intents, pred_intents, average="weighted", zero_division=0) * 100.0
-
-        clf_dict = classification_report(true_intents, pred_intents, output_dict=True, zero_division=0)
-        for k, v in clf_dict.items():
-            if isinstance(v, dict):
-                per_class_classification[k] = {
-                    "precision_pct": round(v["precision"] * 100.0, 2),
-                    "recall_pct": round(v["recall"] * 100.0, 2),
-                    "f1_score": round(v["f1-score"], 3),
-                    "support": int(v["support"]),
-                }
-    else:
-        intent_accuracy = intent_precision = intent_recall = 0.0
-
-    urgency_accuracy = (accuracy_score(true_urgencies, pred_urgencies) * 100.0) if (true_urgencies and pred_urgencies) else 0.0
-
-    citation_accuracy_pct = (valid_citations / total_citations_made * 100.0) if total_citations_made > 0 else 100.0
-    hallucination_rate_pct = (hallucinated_responses / auto_responded_count * 100.0) if auto_responded_count > 0 else 0.0
-    retrieval_hit_rate_pct = (retrieval_hits / retrieval_evaluable * 100.0) if retrieval_evaluable > 0 else 100.0
-
-    # Fairness Segmentation Metrics
-    fairness_tier_summary = {}
-    for tier, data in tier_segments.items():
-        cnt = data["total"]
-        fairness_tier_summary[tier] = {
-            "ticket_count": cnt,
-            "fcr_rate_pct": round((data["auto"] / cnt * 100.0) if cnt > 0 else 0.0, 2),
-            "intent_precision_pct": round((data["correct_intent"] / cnt * 100.0) if cnt > 0 else 0.0, 2),
-        }
-
-    fairness_fluency_summary = {}
-    for fluency, data in fluency_segments.items():
-        cnt = data["total"]
-        fairness_fluency_summary[fluency] = {
-            "ticket_count": cnt,
-            "fcr_rate_pct": round((data["auto"] / cnt * 100.0) if cnt > 0 else 0.0, 2),
-            "intent_precision_pct": round((data["correct_intent"] / cnt * 100.0) if cnt > 0 else 0.0, 2),
-        }
-
-    # Coverage reconciliation default
-    reconciliation_active = reconciliation or {
-        "is_reconciled": True,
-        "processed_ticket_count": total,
-        "logged_ticket_count": total,
-        "coverage_pct": 100.0,
-    }
-
-    # =========================================================================
-    # Construct 4 Explicit Build Specification Groups (Table 7)
-    # =========================================================================
-    volume_group = {
-        "tickets_processed": total,
-        "answered_automatically": auto_responded_count,
-        "escalated": escalated_count,
-        "blocked_by_guardrails": blocked_count,
-        "answered_automatically_pct": round(fcr_rate, 2),
-        "escalated_pct": round(escalation_rate, 2),
-        "blocked_by_guardrails_pct": round((blocked_count / total * 100.0) if total > 0 else 0.0, 2),
-    }
-
-    business_group = {
-        "first_contact_resolution_pct": round(fcr_rate, 2),
-        "mean_response_time_seconds": round(mean_latency, 3),
-        "median_response_time_seconds": round(median_latency, 3),
-        "escalation_rate_pct": round(escalation_rate, 2),
-    }
-
-    technical_group = {
-        "classification_precision_and_recall_per_class": per_class_classification,
-        "overall_classification": {
-            "precision_pct": round(intent_precision, 2),
-            "recall_pct": round(intent_recall, 2),
-            "accuracy_pct": round(intent_accuracy, 2),
-        },
-        "retrieval_hit_rate_pct": round(retrieval_hit_rate_pct, 2),
-        "retrieval_hits": retrieval_hits,
-        "retrieval_evaluable_tickets": retrieval_evaluable,
-        "latency": {
-            "mean_seconds": round(mean_latency, 3),
-            "median_seconds": round(median_latency, 3),
-            "p95_seconds": round(p95_latency, 3),
-        },
-        "urgency_accuracy_pct": round(urgency_accuracy, 2),
-        "citation_accuracy_pct": round(citation_accuracy_pct, 2),
-        "hallucination_rate_pct": round(hallucination_rate_pct, 2),
-    }
-
-    governance_group = {
-        "decisions_logged": reconciliation_active.get("logged_ticket_count", total),
-        "decision_reconciliation": reconciliation_active,
-        "guardrail_activations_by_type": guardrail_breakdown,
-        "total_guardrail_blocks": blocked_count,
-        "private_data_detections": pii_violations,
-    }
-
-    raw_metrics = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "total_tickets_evaluated": total,
-
-        # Build Specification Table 7 Groups:
-        "volume": volume_group,
-        "business": business_group,
-        "technical": technical_group,
-        "governance": governance_group,
-
-        # Backwards-compatible fields for existing scorecards & automated tests:
-        "tier_one_business_outcomes": {
-            "first_contact_resolution_rate_pct": round(fcr_rate, 2),
-            "escalation_rate_pct": round(escalation_rate, 2),
-            "auto_responded_count": auto_responded_count,
-            "escalated_count": escalated_count,
-            "latency": {
-                "mean_seconds": round(mean_latency, 3),
-                "median_seconds": round(median_latency, 3),
-                "p95_seconds": round(p95_latency, 3),
-            }
-        },
-        "tier_two_technical_performance": {
-            "intent_classification_precision_pct": round(intent_precision, 2),
-            "intent_classification_recall_pct": round(intent_recall, 2),
-            "intent_classification_accuracy_pct": round(intent_accuracy, 2),
-            "urgency_accuracy_pct": round(urgency_accuracy, 2),
-            "citation_accuracy_pct": round(citation_accuracy_pct, 2),
-            "hallucination_rate_pct": round(hallucination_rate_pct, 2),
-            "pii_leakage_violations": pii_violations,
-        },
-        "fairness_audit": {
-            "by_customer_tier": fairness_tier_summary,
-            "by_language_fluency": fairness_fluency_summary,
-        },
-        "reconciliation_check": reconciliation_active,
-    }
-
-    raw_metrics["contract_kpis"] = evaluate_contract_kpis(raw_metrics)
-    return raw_metrics
-
-
-# ==============================================================================
-# Contract KPI Specifications (SLA Benchmarks)
-# ==============================================================================
-
-CONTRACT_KPIS: List[Dict[str, Any]] = [
-    {
-        "id": "KPI-01",
-        "name": "First Contact Resolution (FCR)",
-        "category": "Tier-1 Business Outcomes",
-        "target_operator": ">=",
-        "target_value": 60.0,
-        "target_display": ">= 60.0%",
-        "metric_path": ["tier_one_business_outcomes", "first_contact_resolution_rate_pct"],
-        "unit": "%",
-        "policy_rule": "Auto-responds only when classifier confidence >= 0.80 and authoritative docs are grounded.",
-        "description": "Rate of inbound customer inquiries successfully resolved by autonomous AI without requiring Tier-2 human escalation."
-    },
-    {
-        "id": "KPI-02",
-        "name": "Escalation Rate",
-        "category": "Tier-1 Business Outcomes",
-        "target_operator": "<=",
-        "target_value": 30.0,
-        "target_display": "<= 30.0%",
-        "metric_path": ["tier_one_business_outcomes", "escalation_rate_pct"],
-        "unit": "%",
-        "policy_rule": "Deterministic policy gate safely escalates low-confidence (<0.80), high-risk intents, and policy exclusions.",
-        "description": "Rate of tickets routed to human support teams; must remain controlled to avoid agent burnout while prioritizing safety."
-    },
-    {
-        "id": "KPI-03",
-        "name": "P95 Response Latency",
-        "category": "Tier-1 Business Outcomes",
-        "target_operator": "<",
-        "target_value": 300.0,
-        "target_display": "< 300.0s (5m)",
-        "metric_path": ["tier_one_business_outcomes", "latency", "p95_seconds"],
-        "unit": "s",
-        "policy_rule": "Sub-second vector retrieval + streaming LLM generation pipeline.",
-        "description": "95th percentile turnaround time from initial ticket ingestion to customer delivery or escalation dispatch."
-    },
-    {
-        "id": "KPI-04",
-        "name": "Intent Classification Precision",
-        "category": "Tier-2 Technical Performance",
-        "target_operator": ">=",
-        "target_value": 85.0,
-        "target_display": ">= 85.0%",
-        "metric_path": ["tier_two_technical_performance", "intent_classification_precision_pct"],
-        "unit": "%",
-        "policy_rule": "Few-shot calibrated prompt classifier over 22 ground-truth intents with confidence scoring.",
-        "description": "Weighted precision score comparing predicted support intent against verified ground-truth labels."
-    },
-    {
-        "id": "KPI-05",
-        "name": "PII & Credential Leakage Violations",
-        "category": "Governance & Safety Guardrails",
-        "target_operator": "==",
-        "target_value": 0,
-        "target_display": "0 violations",
-        "metric_path": ["tier_two_technical_performance", "pii_leakage_violations"],
-        "unit": "count",
-        "policy_rule": "Strict safety guardrail: Block and escalate. Never redact and send.",
-        "description": "Zero tolerance for leaking API keys, passwords, bearer tokens, or sensitive customer identifiable info."
-    },
-    {
-        "id": "KPI-06",
-        "name": "Audit Decision Reconciliation Coverage",
-        "category": "Governance & Safety Guardrails",
-        "target_operator": "==",
-        "target_value": 100.0,
-        "target_display": "100.0% (0 gaps)",
-        "metric_path": ["reconciliation_check", "coverage_pct"],
-        "unit": "%",
-        "policy_rule": "100% of triage decisions must be permanently recorded in SQLite store conforming to the 15-field schema.",
-        "description": "1:1 coverage reconciliation ensuring zero ghost or unlogged decisions across all 4 customer channels."
-    },
-]
-
-
-def evaluate_contract_kpis(metrics: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Evaluates all contract KPIs comparing target SLAs against actual achieved metrics.
-    Adds clear achieved booleans, status badges ('PASS' / 'FAIL'), variance deltas,
-    and status colors ('green' / 'red').
-    """
-    evaluated_kpis: List[Dict[str, Any]] = []
-    achieved_count = 0
-
-    # Ensure reconciliation_check has coverage_pct based on processed tickets matched
-    recon = metrics.get("reconciliation_check") or {}
-    processed = recon.get("processed_ticket_count", metrics.get("total_tickets_evaluated", 0))
-    missing_count = len(recon.get("missing_ticket_ids", []))
-    matched = max(0, processed - missing_count)
-    recon["coverage_pct"] = round((matched / processed * 100.0) if processed > 0 else 100.0, 2)
-    metrics["reconciliation_check"] = recon
-
-    for spec in CONTRACT_KPIS:
-        curr: Any = metrics
-        for k in spec["metric_path"]:
-            if isinstance(curr, dict) and k in curr:
-                curr = curr[k]
-            else:
-                curr = None
-                break
-
-        val: float = float(curr) if curr is not None else 0.0
-        op = spec["target_operator"]
-        target = float(spec["target_value"])
-
-        if op == ">=":
-            achieved = bool(val >= target)
-        elif op == "<=":
-            achieved = bool(val <= target)
-        elif op == "<":
-            achieved = bool(val < target)
-        elif op == "==":
-            achieved = bool(round(val, 2) == round(target, 2))
-        else:
-            achieved = False
-
-        if achieved:
-            achieved_count += 1
-
-        variance = round(val - target, 2)
-        unit = spec["unit"]
-        if unit == "%":
-            achieved_display = f"{val:.2f}%"
-            variance_display = f"{variance:+.2f}%"
-        elif unit == "s":
-            achieved_display = f"{val:.2f}s"
-            variance_display = f"{variance:+.2f}s"
-        else:
-            achieved_display = f"{int(val)} violations" if "violation" in spec["name"].lower() else str(int(val))
-            variance_display = f"{int(variance):+d}"
-
-        evaluated_kpis.append({
-            "id": spec["id"],
-            "name": spec["name"],
-            "category": spec["category"],
-            "target_operator": op,
-            "target_value": target,
-            "target_display": spec["target_display"],
-            "achieved_value": val,
-            "achieved_display": achieved_display,
-            "variance": variance,
-            "variance_display": variance_display,
-            "achieved": achieved,
-            "status": "PASS" if achieved else "FAIL",
-            "status_color": "green" if achieved else "red",
-            "policy_rule": spec["policy_rule"],
-            "description": spec["description"],
-        })
-
-    total_kpis = len(CONTRACT_KPIS)
-    missed_count = total_kpis - achieved_count
-    compliance_score = round(achieved_count / total_kpis * 100.0, 1)
-
+def classification(truth, predictions):
+    if not truth:
+        return {"sample_count": 0, "accuracy_pct": None, "precision_pct": None,
+                "recall_pct": None, "macro_precision_pct": None,
+                "minimum_class_precision_pct": None, "per_class": {},
+                "confusion_matrix": {"labels": [], "rows_true_columns_predicted": []}}
+    labels = sorted(set(truth) | set(predictions))
+    report = classification_report(truth, predictions, labels=labels,
+                                   output_dict=True, zero_division=0)
+    classes = {label: {"precision_pct": report[label]["precision"] * 100,
+                       "recall_pct": report[label]["recall"] * 100,
+                       "f1_score": report[label]["f1-score"],
+                       "support": int(report[label]["support"])} for label in labels}
     return {
-        "summary": {
-            "total_kpis": total_kpis,
-            "achieved_kpis": achieved_count,
-            "missed_kpis": missed_count,
-            "compliance_score_pct": compliance_score,
-            "overall_status": "COMPLIANT" if missed_count == 0 else "NON_COMPLIANT",
-            "overall_status_display": f"{compliance_score}% Contract Compliance ({achieved_count}/{total_kpis} KPIs Achieved)",
-            "overall_color": "green" if missed_count == 0 else "red",
-        },
-        "kpis": evaluated_kpis,
+        "sample_count": len(truth),
+        "accuracy_pct": percent(sum(a == b for a, b in zip(truth, predictions)), len(truth)),
+        "precision_pct": report["weighted avg"]["precision"] * 100,
+        "recall_pct": report["weighted avg"]["recall"] * 100,
+        "macro_precision_pct": report["macro avg"]["precision"] * 100,
+        "minimum_class_precision_pct": min(classes[label]["precision_pct"] for label in set(truth)),
+        "per_class": classes,
+        "confusion_matrix": {"labels": labels,
+            "rows_true_columns_predicted": confusion_matrix(truth, predictions, labels=labels).tolist()},
     }
 
 
-def print_evaluation_report(metrics: Dict[str, Any]) -> None:
-    """Prints a clean ASCII scorecard summarizing the 4 Build Spec groups and contract SLAs."""
-    contract_data = metrics.get("contract_kpis") or evaluate_contract_kpis(metrics)
-    summary = contract_data["summary"]
-    kpis = contract_data["kpis"]
+def calibration(samples):
+    rows = []
+    for index in range(5):
+        low, high = index / 5, (index + 1) / 5
+        group = [(score, correct) for score, correct in samples
+                 if low <= score and (score < high or index == 4 and score == 1)]
+        if not group:
+            continue
+        mean = statistics.mean(score for score, _ in group) * 100
+        observed = 100 * sum(correct for _, correct in group) / len(group)
+        rows.append({"lower_inclusive": low, "upper": high,
+                     "upper_inclusive": index == 4, "sample_count": len(group),
+                     "mean_confidence_pct": mean, "observed_accuracy_pct": observed,
+                     "absolute_gap_pp": abs(mean - observed)})
+    return {"sample_count": len(samples), "bins": rows,
+            "maximum_gap_pp": max((r["absolute_gap_pp"] for r in rows), default=None),
+            "interpretation": "Descriptive only; small bins are uncertain. Missing/invalid scores are excluded and counted separately."}
 
-    vol = metrics.get("volume", {})
-    biz = metrics.get("business", {})
-    tech = metrics.get("technical", {})
-    gov = metrics.get("governance", {})
 
-    print("\n" + "=" * 85)
-    print("      CLOUDSERVE INTELLIGENT SUPPORT -- EVALUATION METRICS REPORT      ")
-    print("=" * 85)
+def compute_metrics(processed_results, raw_tickets, timings, reconciliation=None):
+    if not (len(processed_results) == len(raw_tickets) == len(timings)):
+        raise ValueError("Results, inputs, and timings must have equal lengths")
+    total = len(processed_results)
+    if not total:
+        raise ValueError("No tickets processed")
+    if any(not math.isfinite(t) or t < 0 for t in timings):
+        raise ValueError("Timings must be finite nonnegative seconds")
+    auto = sum(r.get("route") == "auto_respond" for r in processed_results)
+    escalated = sum(r.get("route") == "escalate" for r in processed_results)
+    blocked = sum(bool(r.get("guardrail_blocked")) for r in processed_results)
+    intent_true, intent_pred, urgency_true, urgency_pred = [], [], [], []
+    route_true, route_pred, confidence_samples = [], [], []
+    counters = Counter()
+    failure_examples = []
+    segments = {name: defaultdict(list) for name in
+                ("customer_tier", "language_fluency", "customer_region", "ticket_length")}
+    review_counts = Counter()
+    guardrail_counts = Counter()
+    for index, (norm, result) in enumerate(zip(raw_tickets, processed_results), 1):
+        checks = result.get("guardrail_results") or {}
+        for check, status in checks.items():
+            if status == "fail":
+                guardrail_counts[check] += 1
+        if checks.get("pii") == "fail" and result.get("route") == "auto_respond":
+            counters["outbound_scanner_detections"] += 1
+        if norm is None:
+            continue
+        labels = norm.labels
+        automatic = result.get("route") == "auto_respond"
+        predicted = result.get("intent") or "__missing_prediction__"
+        truth = labels.intent if labels else None
+        if truth:
+            intent_true.append(truth)
+            intent_pred.append(predicted)
+            score = result.get("classification_confidence")
+            if isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score) and 0 <= score <= 1:
+                confidence_samples.append((score, predicted == truth))
+            else:
+                counters["invalid_or_missing_confidence"] += 1
+        if labels and labels.urgency:
+            urgency_true.append(labels.urgency)
+            urgency_pred.append(result.get("urgency") or "__missing_prediction__")
+        expected_route = labels.expected_route if labels else None
+        if expected_route:
+            route_true.append(expected_route)
+            route_pred.append(result.get("route") or "__missing_prediction__")
+            if expected_route == "escalate":
+                counters["expected_escalations"] += 1
+                counters["false_auto"] += automatic
+            if expected_route == "auto_respond" and result.get("route") == "escalate":
+                counters["false_escalations"] += 1
+        if labels and labels.must_not_auto_respond:
+            counters["policy_excluded"] += 1
+            counters["policy_excluded_auto"] += automatic
+        if labels and labels.answerable_from_docs is False:
+            counters["not_answerable"] += 1
+            counters["not_answerable_auto"] += automatic
+        if len(failure_examples) < 25 and ((truth and truth != predicted) or (expected_route and expected_route != result.get("route"))):
+            failure_examples.append({"input_index": index, "ticket_id": norm.ticket_id,
+                "expected_intent": truth, "predicted_intent": predicted,
+                "expected_route": expected_route, "route": result.get("route"),
+                "processing_error": result.get("error")})
+        expected_docs = set(labels.expected_doc_ids or []) if labels else set()
+        retrieved = {p.get("doc_id") for p in result.get("retrieved_passages", [])}
+        if expected_docs:
+            counters["retrieval_evaluable"] += 1
+            counters["retrieval_hits"] += bool(expected_docs & retrieved)
+        # Count citation occurrences in actual emitted text, rather than model metadata.
+        citations = re.findall(r"\[(DOC-[A-Za-z0-9_-]+)\]", result.get("generated_response") or "") if automatic else []
+        valid = sum(doc in retrieved for doc in citations)
+        counters["citations"] += len(citations)
+        counters["valid_citation_ids"] += valid
+        if automatic:
+            counters["hallucination_proxy_flags"] += bool(valid < len(citations) or (expected_docs and not expected_docs.intersection(citations)))
+            counters["auto_without_citations"] += not bool(citations)
+            review = result.get("grounding_review") or {}
+            review_counts[f"{review.get('method', 'not_run')}:{review.get('status', 'not_run')}"] += 1
+            if expected_docs:
+                counters["reference_doc_evaluable"] += 1
+                counters["reference_doc_mismatch"] += not bool(expected_docs & set(citations))
+        words = len(f"{norm.subject} {norm.body}".split())
+        length = "short_1_50_words" if words <= 50 else "medium_51_150_words" if words <= 150 else "long_over_150_words"
+        for dimension, value in (("customer_tier", norm.customer_tier),
+                                  ("language_fluency", norm.language_fluency),
+                                  ("customer_region", norm.customer_region), ("ticket_length", length)):
+            segments[dimension][value.lower()].append({"auto": automatic, "truth": truth,
+                "predicted": predicted, "citations": len(citations), "valid_ids": valid})
+    intents = classification(intent_true, intent_pred)
+    urgencies = classification(urgency_true, urgency_pred)
+    fairness = {}
+    for dimension, groups in segments.items():
+        summary = {}
+        for name, rows in groups.items():
+            labelled = [r for r in rows if r["truth"]]
+            summary[name] = {"ticket_count": len(rows), "labelled_intent_count": len(labelled),
+                "automation_rate_pct": percent(sum(r["auto"] for r in rows), len(rows)),
+                "intent_accuracy_pct": percent(sum(r["truth"] == r["predicted"] for r in labelled), len(labelled)),
+                "citation_occurrence_count": sum(r["citations"] for r in rows),
+                "citation_id_validity_pct": percent(sum(r["valid_ids"] for r in rows), sum(r["citations"] for r in rows)),
+                "resolution_quality_pct": None}
+        accuracy = [r["intent_accuracy_pct"] for r in summary.values() if r["intent_accuracy_pct"] is not None]
+        fairness[f"by_{dimension}"] = summary
+        fairness[f"{dimension}_intent_accuracy_spread_pp"] = max(accuracy) - min(accuracy) if len(accuracy) > 1 else None
+    fairness["resolution_quality_spread_pp"] = None
+    fairness["interpretation"] = "Automation, accuracy and ID validity are diagnostic proxies, not resolution quality or proof of bias. Length is not measured complexity; consider case mix and sample sizes."
+    recon = reconciliation or {"is_reconciled": False, "processed_ticket_count": total,
+        "logged_ticket_count": None, "coverage_pct": None, "verification_status": "not_run"}
+    latency = {"sample_count": len(timings), "mean_seconds": statistics.mean(timings),
+        "median_seconds": statistics.median(timings),
+        "p95_seconds": sorted(timings)[math.ceil(.95 * len(timings)) - 1],
+        "percentile_method": "nearest_rank_ceil", "scope": "Per-input processing through audit logging; not customer delivery latency."}
+    cal = calibration(confidence_samples)
+    cal["invalid_or_missing_confidence_count"] = counters["invalid_or_missing_confidence"]
+    metrics = {
+        "metrics_schema_version": "2.1", "reporting_profile": "legacy_operational_proxies", "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total_tickets_evaluated": total,
+        "volume": {"tickets_processed": total, "answered_automatically": auto, "escalated": escalated,
+                   "blocked_by_guardrails": blocked, "answered_automatically_pct": percent(auto, total),
+                   "escalated_pct": percent(escalated, total)},
+        "business": {"automation_rate_pct": percent(auto, total), "escalation_rate_pct": percent(escalated, total),
+            "first_contact_resolution_pct": None, "mean_time_to_first_reply_seconds": None,
+            "median_time_to_first_reply_seconds": None, "satisfaction_proxy_score": None,
+            "repeat_contact_reduction_pct": None,
+            "evidence_status": "No closure, customer delivery, assessor, or post-deployment outcome evidence collected."},
+        "technical": {"overall_classification": intents,
+            "classification_precision_and_recall_per_class": intents["per_class"],
+            "urgency_classification": urgencies, "urgency_accuracy_pct": urgencies["accuracy_pct"],
+            "high_urgency_recall_pct": urgencies["per_class"].get("high", {}).get("recall_pct"),
+            "retrieval_hits": counters["retrieval_hits"], "retrieval_evaluable_tickets": counters["retrieval_evaluable"],
+            "retrieval_hit_rate_pct": percent(counters["retrieval_hits"], counters["retrieval_evaluable"]),
+            "citation_occurrence_count": counters["citations"],
+            "citation_id_validity_pct": percent(counters["valid_citation_ids"], counters["citations"]),
+            "auto_responses_without_citations": counters["auto_without_citations"],
+            "reference_doc_mismatch_count": counters["reference_doc_mismatch"],
+            "reference_doc_evaluable_responses": counters["reference_doc_evaluable"],
+            "reference_doc_mismatch_rate_pct": percent(counters["reference_doc_mismatch"], counters["reference_doc_evaluable"]),
+            "hallucination_proxy_rate_pct": percent(counters["hallucination_proxy_flags"], auto),
+            "hallucination_proxy_flag_count": counters["hallucination_proxy_flags"],
+            "hallucination_proxy_denominator": auto,
+            "citation_accuracy_pct": None, "hallucination_rate_pct": None,
+            "quality_evidence_status": "Independent claim/citation review pending; runtime grounding checks are not the required two-assessor review.",
+            "runtime_grounding_reviews": dict(review_counts), "latency": latency, "availability_pct": None},
+        "routing": {"labelled_ticket_count": len(route_true),
+            "agreement_pct": percent(sum(a == b for a, b in zip(route_true, route_pred)), len(route_true)),
+            "expected_escalation_count": counters["expected_escalations"],
+            "false_auto_count": counters["false_auto"],
+            "false_auto_rate_among_expected_escalations_pct": percent(counters["false_auto"], counters["expected_escalations"]),
+            "false_escalation_count": counters["false_escalations"],
+            "must_not_auto_respond_count": counters["policy_excluded"],
+            "must_not_auto_respond_violation_count": counters["policy_excluded_auto"],
+            "not_answerable_from_docs_count": counters["not_answerable"],
+            "not_answerable_from_docs_auto_count": counters["not_answerable_auto"],
+            "confusion_matrix": classification(route_true, route_pred)["confusion_matrix"]},
+        "governance": {"decisions_logged": recon.get("logged_ticket_count"),
+            "decision_reconciliation": recon, "total_guardrail_blocks": blocked,
+            "guardrail_activations_by_type": dict(guardrail_counts),
+            "draft_pii_detections": guardrail_counts["pii"],
+            "outbound_scanner_detections": counters["outbound_scanner_detections"],
+            "verified_outbound_private_data_occurrences": None,
+            "privacy_evidence_status": "Scanner findings are not proof of zero leaks; manual sample review pending."},
+        "confidence_calibration": cal, "fairness_audit": fairness,
+        "failure_examples": failure_examples, "reconciliation_check": recon,
+    }
+    # Retain group names used by existing consumers, but never misleading numeric aliases.
+    metrics["tier_one_business_outcomes"] = dict(metrics["business"])
+    metrics["tier_two_technical_performance"] = dict(metrics["technical"])
+    metrics["contract_kpis"] = evaluate_contract_kpis(metrics)
+    return metrics
+
+
+# Selected console/report scorecard: the seven KPIs requested by the project owner.
+KPI_DEFINITIONS = [('First Contact Resolution (auto-response proxy)', 'business.automation_rate_pct', '>=', 60, '%'), ('Escalation rate', 'business.escalation_rate_pct', '<=', 30, '%'), ('P95 Response Latency', 'technical.latency.p95_seconds', '<', 300, 's'), ('Intent Classification Precision (weighted)', 'technical.overall_classification.precision_pct', '>=', 85, '%'), ('PII & Credential Scanner Detections', 'governance.draft_pii_detections', '==', 0, 'count'), ('Exact audit reconciliation', 'reconciliation_check.coverage_pct', '==', 100, '%'), ('Citation Accuracy (retrieved-ID proxy)', 'technical.citation_id_validity_pct', '>=', 95, '%')]
+
+
+def evaluate_contract_kpis(metrics):
+    kpis = []
+    for index, (name, path, operator, target, unit) in enumerate(KPI_DEFINITIONS, 1):
+        value = metrics
+        for key in path.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        measured = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        passed = None
+        if measured:
+            passed = {">=": value >= target, "<=": value <= target, "<": value < target, "==": value == target}[operator]
+            if index == 6:
+                recon = metrics.get("reconciliation_check", {})
+                passed = passed and recon.get("is_reconciled", False) and recon.get("processed_ticket_count", 0) > 0
+        kpis.append({"id": f"KPI-{index:02}", "name": name, "metric_path": path.split("."),
+            "target_operator": operator, "target_value": target, "unit": unit,
+            "target_display": f"{operator} {target} {unit}", "achieved_value": value,
+            "achieved_display": f"{value:.2f} {unit}" if measured else "Not measured",
+            "achieved": bool(passed) if measured else None,
+            "status": ("PASS" if passed else "FAIL") if measured else "NOT_MEASURED",
+            "source": 'User-selected legacy operational scorecard; proxy definitions and 300-second P95 comparison benchmark.'})
+    counts = Counter(k["status"] for k in kpis)
+    return {"summary": {"total_kpis": len(kpis), "achieved_kpis": counts["PASS"],
+        "missed_kpis": counts["FAIL"], "unmeasured_kpis": counts["NOT_MEASURED"],
+        "benchmark_score_pct": percent(counts["PASS"], len(kpis)),
+        "overall_status": "NOT_ESTABLISHED" if counts["NOT_MEASURED"] else "TARGET_FAILURES" if counts["FAIL"] else "MEASURED_TARGETS_MET",
+        "scope": "Seven legacy operational benchmarks. FCR is automation, citation accuracy is ID validity, and PII is scanner detections. The 300-second P95 target is the legacy comparison threshold, not the framework's 3-second target. This is not confirmed resolution, independent quality verification or full framework compliance."},
+        "kpis": kpis}
+
+
+def print_evaluation_report(metrics):
+    """Print the original four-section report with the seven selected KPIs."""
+    def number(value, digits=2, suffix=""):
+        if value is None or not isinstance(value, (int, float)) or not math.isfinite(value):
+            return "Not measured"
+        return f"{value:.{digits}f}{suffix}"
+
+    def section(title):
+        print("\n" + "-" * 100)
+        print(title)
+        print("-" * 100)
+
+    volume = metrics.get("volume", {})
+    business = metrics.get("business", {})
+    technical = metrics.get("technical", {})
+    governance = metrics.get("governance", {})
+    latency = technical.get("latency", {})
+    contract = evaluate_contract_kpis(metrics)
+    summary = contract["summary"]
+    total = metrics.get("total_tickets_evaluated", volume.get("tickets_processed", 0))
+    blocked = volume.get("blocked_by_guardrails", 0)
+    blocked_pct = percent(blocked, total)
+
+    print("\n" + "=" * 100)
+    print("      CLOUDSERVE INTELLIGENT SUPPORT -- EVALUATION METRICS REPORT")
+    print("=" * 100)
     print(f"Evaluated At : {metrics.get('timestamp', 'N/A')}")
-    print(f"Tickets Run  : {metrics.get('total_tickets_evaluated', 0)} unattended tickets")
-    print(f"Compliance   : {summary['achieved_kpis']}/{summary['total_kpis']} Contract KPIs Achieved ({summary['compliance_score_pct']}%) [{summary['overall_status']}]")
+    print(f"Tickets Run  : {total} unattended tickets")
+    print(f"KPI Status  : {summary['achieved_kpis']}/{summary['total_kpis']} selected benchmarks achieved "
+          f"({number(summary['benchmark_score_pct'], 1, '%')}); "
+          f"{summary['missed_kpis']} failed; {summary.get('unmeasured_kpis', 0)} not measured "
+          f"[{summary['overall_status']}]")
 
-    # Group 1: Volume
-    print("\n" + "-" * 85)
-    print(" [1] VOLUME METRICS")
-    print("-" * 85)
-    print(f"  Tickets Processed        : {vol.get('tickets_processed', metrics.get('total_tickets_evaluated', 0))}")
-    print(f"  Answered Automatically   : {vol.get('answered_automatically', 0)} ({vol.get('answered_automatically_pct', 0.0):.2f}%)")
-    print(f"  Escalated                : {vol.get('escalated', 0)} ({vol.get('escalated_pct', 0.0):.2f}%)")
-    print(f"  Blocked by Guardrails    : {vol.get('blocked_by_guardrails', 0)} ({vol.get('blocked_by_guardrails_pct', 0.0):.2f}%)")
+    section(" [1] VOLUME METRICS")
+    print(f"  Tickets Processed        : {total}")
+    print(f"  Answered Automatically   : {volume.get('answered_automatically', 0)} "
+          f"({number(volume.get('answered_automatically_pct'), suffix='%')})")
+    print(f"  Escalated                : {volume.get('escalated', 0)} "
+          f"({number(volume.get('escalated_pct'), suffix='%')})")
+    print(f"  Blocked by Guardrails    : {blocked} ({number(blocked_pct, suffix='%')})")
 
-    # Group 2: Business Outcomes
-    print("\n" + "-" * 85)
-    print(" [2] BUSINESS OUTCOMES")
-    print("-" * 85)
-    print(f"  First Contact Resolution : {biz.get('first_contact_resolution_pct', 0.0):.2f}%  [Contract Target: >= 60.0%]")
-    print(f"  Escalation Rate          : {biz.get('escalation_rate_pct', 0.0):.2f}%  [Contract Target: <= 30.0%]")
-    print(f"  Mean Response Time       : {biz.get('mean_response_time_seconds', 0.0):.3f}s")
-    print(f"  Median Response Time     : {biz.get('median_response_time_seconds', 0.0):.3f}s")
+    section(" [2] BUSINESS OUTCOMES")
+    print(f"  First Contact Resolution*: {number(business.get('automation_rate_pct'), suffix='%')}  [Target: >= 60.0%]")
+    print(f"  Escalation Rate          : {number(business.get('escalation_rate_pct'), suffix='%')}  [Target: <= 30.0%]")
+    print(f"  Mean Response Time       : {number(latency.get('mean_seconds'), 3, 's')}")
+    print(f"  Median Response Time     : {number(latency.get('median_seconds'), 3, 's')}")
 
-    # Group 3: Technical Performance
-    print("\n" + "-" * 85)
-    print(" [3] TECHNICAL PERFORMANCE")
-    print("-" * 85)
-    evaluable = tech.get('retrieval_evaluable_tickets', 0)
-    hits = tech.get('retrieval_hits', 0)
-    print(f"  Retrieval Hit Rate       : {tech.get('retrieval_hit_rate_pct', 100.0):.2f}% ({hits}/{evaluable} evaluable tickets)")
-    lat = tech.get('latency', {})
-    print(f"  Latency (Median)         : {lat.get('median_seconds', 0.0):.3f}s")
-    print(f"  Latency (P95)            : {lat.get('p95_seconds', 0.0):.3f}s  [Contract Target: < 300.0s]")
+    section(" [3] TECHNICAL PERFORMANCE")
+    print(f"  Retrieval Hit Rate       : {number(technical.get('retrieval_hit_rate_pct'), suffix='%')} "
+          f"({technical.get('retrieval_hits', 0)}/{technical.get('retrieval_evaluable_tickets', 0)} evaluable tickets)")
+    print(f"  Citation Accuracy*       : {number(technical.get('citation_id_validity_pct'), suffix='%')}  [Target: >= 95.0%]")
+    print(f"  Hallucination Rate*      : {number(technical.get('hallucination_proxy_rate_pct'), suffix='%')}  [Target: <= 5.0%]")
+    print(f"  Latency (Median)         : {number(latency.get('median_seconds'), 3, 's')}")
+    print(f"  Latency (P95)            : {number(latency.get('p95_seconds'), 3, 's')}  [Legacy benchmark: < 300.0s]")
 
-    per_class = tech.get("classification_precision_and_recall_per_class", {})
-    if per_class:
+    classes = technical.get("classification_precision_and_recall_per_class", {})
+    if classes:
         print("\n  Classification Precision & Recall per Class:")
-        print(f"    {'Class Name':<28} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<9} | {'Support'}")
-        print("    " + "-" * 73)
-        for cname, cstats in per_class.items():
-            if cname in ["accuracy", "macro avg", "weighted avg"]:
+        print(f"    {'Class Name':<28} | {'Precision':>9} | {'Recall':>9} | {'F1-Score':>8} | {'Support':>7}")
+        print("    " + "-" * 76)
+        supported = []
+        for name, stats in classes.items():
+            if name in {"accuracy", "macro avg", "weighted avg"}:
                 continue
-            print(f"    {cname:<28} | {cstats['precision_pct']:>8.2f}% | {cstats['recall_pct']:>8.2f}% | {cstats['f1_score']:>8.3f} | {cstats['support']:>6}")
-        print("    " + "-" * 73)
-        if "weighted avg" in per_class:
-            w = per_class["weighted avg"]
-            print(f"    {'Weighted Average':<28} | {w['precision_pct']:>8.2f}% | {w['recall_pct']:>8.2f}% | {w['f1_score']:>8.3f} | {w['support']:>6}")
+            print(f"    {name:<28} | {number(stats.get('precision_pct'), suffix='%'):>9} | "
+                  f"{number(stats.get('recall_pct'), suffix='%'):>9} | "
+                  f"{number(stats.get('f1_score'), 3):>8} | {stats.get('support', 0):>7}")
+            supported.append(stats)
+        overall = technical.get("overall_classification", {})
+        support = sum(row.get("support", 0) for row in supported)
+        weighted_f1 = sum(row.get("f1_score", 0) * row.get("support", 0) for row in supported) / support if support else None
+        print("    " + "-" * 76)
+        print(f"    {'Weighted Average':<28} | {number(overall.get('precision_pct'), suffix='%'):>9} | "
+              f"{number(overall.get('recall_pct'), suffix='%'):>9} | {number(weighted_f1, 3):>8} | {support:>7}")
 
-    # Group 4: Governance & Risk
-    print("\n" + "-" * 85)
-    print(" [4] GOVERNANCE & RISK")
-    print("-" * 85)
-    recon = gov.get("decision_reconciliation", metrics.get("reconciliation_check", {}))
-    print(f"  Decisions Logged in Audit: {gov.get('decisions_logged', 0)} (Reconciled: {recon.get('is_reconciled', True)}, Coverage: {recon.get('coverage_pct', 100.0):.1f}%)")
-    print(f"  Private Data Detections  : {gov.get('private_data_detections', 0)} violations  [Contract Target: 0 violations]")
-    gr_act = gov.get("guardrail_activations_by_type", {})
+    section(" [4] GOVERNANCE & RISK")
+    recon = governance.get("decision_reconciliation", metrics.get("reconciliation_check", {}))
+    logged = governance.get("decisions_logged")
+    print(f"  Decisions Logged in Audit: {logged if logged is not None else 'Not verified'} "
+          f"(Reconciled: {recon.get('is_reconciled', False)}, Coverage: {number(recon.get('coverage_pct'), suffix='%')})")
+    print(f"  Private Data Detections  : {governance.get('draft_pii_detections', governance.get('private_data_detections', 0))} draft scanner detections")
+    activations = governance.get("guardrail_activations_by_type", {})
+    grounding_blocks = sum(
+        activations.get(key, 0) for key in ("grounding", "citation")
+    )  # These counters describe checks; one draft can trigger multiple checks.
     print("  Guardrail Activations by Type:")
-    print(f"    - PII / Secrets Leakage           : {gr_act.get('pii_leakage', 0)}")
-    print(f"    - Citation / Grounding Failure    : {gr_act.get('grounding_or_citation', 0)}")
-    print(f"    - Prompt Injection Jailbreak      : {gr_act.get('prompt_injection', 0)}")
-    print(f"    - Unauthorized Commitments        : {gr_act.get('unauthorized_commitments', 0)}")
-    print(f"  Total Guardrail Blocks              : {gov.get('total_guardrail_blocks', 0)}")
+    for label, count in (
+        ("PII / Secrets Leakage", activations.get("pii", activations.get("pii_leakage", 0))),
+        ("Citation / Grounding Failure", activations.get("grounding_or_citation", grounding_blocks)),
+        ("Prompt Injection Jailbreak", activations.get("instruction_integrity", activations.get("prompt_injection", 0))),
+        ("Unauthorized Commitments", activations.get("commitments", activations.get("unauthorized_commitments", 0))),
+    ):
+        print(f"    - {label:<32}: {count}")
+    print(f"  Total Guardrail Blocks   : {governance.get('total_guardrail_blocks', blocked)}")
 
-    # Contract KPI SLA Benchmark
-    print("\n" + "-" * 85)
-    print(" CONTRACT SLA BENCHMARK SCORECARD")
-    print("-" * 85)
-    print(f"{'KPI ID':<7} | {'Metric Name':<35} | {'Target':<14} | {'Actual':<11} | {'Status'}")
-    print("-" * 85)
-    for kpi in kpis:
-        status_bracket = f"[{kpi['status']}]"
-        t_disp = str(kpi['target_display']).replace('≥', '>=').replace('≤', '<=')
-        a_disp = str(kpi['achieved_display'])
-        print(f"{kpi['id']:<7} | {kpi['name']:<35} | {t_disp:<14} | {a_disp:<11} | {status_bracket}")
+    section(" SELECTED KPI BENCHMARK SCORECARD")
+    rows = contract["kpis"]
+    name_width = max(35, max((len(row["name"]) for row in rows), default=0))
+    print(f"{'KPI ID':<7} | {'Metric Name':<{name_width}} | {'Target':<15} | {'Actual':<15} | Status")
+    print("-" * (name_width + 65))
+    for row in rows:
+        print(f"{row['id']:<7} | {row['name']:<{name_width}} | {row['target_display']:<15} | "
+              f"{row['achieved_display']:<15} | [{row['status']}]")
 
-    # Segmented fairness summary
     fairness = metrics.get("fairness_audit", {})
-    if "by_customer_tier" in fairness:
+    if fairness.get("by_customer_tier") or fairness.get("by_language_fluency"):
         print("\nFAIRNESS AUDIT -- SEGMENTED BREAKDOWN:")
-        print("  Customer Tiers:")
-        for tier, stats in fairness["by_customer_tier"].items():
-            print(f"    - {tier.capitalize():<12} : N={stats['ticket_count']:<3} | FCR: {stats['fcr_rate_pct']:>5.1f}% | Intent Prec: {stats['intent_precision_pct']:>5.1f}%")
-
-    if "by_language_fluency" in fairness:
-        print("  Language Fluency:")
-        for flu, stats in fairness["by_language_fluency"].items():
-            print(f"    - {flu.capitalize():<12} : N={stats['ticket_count']:<3} | FCR: {stats['fcr_rate_pct']:>5.1f}% | Intent Prec: {stats['intent_precision_pct']:>5.1f}%")
-
-    print("=" * 85 + "\n")
+        for key, title in (("by_customer_tier", "Customer Tiers"), ("by_language_fluency", "Language Fluency")):
+            if not fairness.get(key):
+                continue
+            print(f"  {title}:")
+            for name, stats in fairness[key].items():
+                automation = stats.get("automation_rate_pct", stats.get("fcr_rate_pct"))
+                accuracy = stats.get("intent_accuracy_pct", stats.get("intent_precision_pct"))
+                print(f"    - {name.capitalize():<12}: N={stats.get('ticket_count', 0):<3} | "
+                      f"Automation: {number(automation, 1, '%'):>6} | Intent Accuracy: {number(accuracy, 1, '%'):>6}")
+    print("\n* FCR = auto-response proxy; citation accuracy = retrieved-ID validity;")
+    print("  hallucination = citation/reference-document mismatch heuristic. Times measure processing.")
+    print("  These operational benchmarks do not establish customer resolution or full framework compliance.")
+    print("=" * 100 + "\n")
 
 
 def run_evaluation(
@@ -627,53 +458,98 @@ def run_evaluation(
     limit: Optional[int] = None,
     use_llm: bool = True,
     db_path: Optional[str] = None,
+    ticket_output_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Runs unattended batch evaluation over a dataset and produces metrics report."""
+    if output_path:
+        destination = Path(output_path).resolve()
+        if destination.is_dir() or destination.suffix.lower() != ".json":
+            destination = destination / "latest_report.json"
+        output_path = str(destination)
     logger.info(f"Loading evaluation tickets from: {input_path}")
-    raw_tickets = load_tickets_from_json(input_path)
+    source_bytes = Path(input_path).read_bytes()
+    inputs = json.loads(source_bytes.decode("utf-8"))
+    if not isinstance(inputs, list) or not inputs:
+        raise ValueError("Evaluation input must be a nonempty JSON array")
 
     if limit and limit > 0:
-        raw_tickets = raw_tickets[:limit]
+        inputs = inputs[:limit]
 
-    logger.info(f"Starting evaluation on {len(raw_tickets)} tickets...")
+    run_id = f"RUN-{uuid.uuid4().hex}"
+    started_at = datetime.now(timezone.utc).isoformat()
+    raw_tickets: List[Optional[NormalizedTicket]] = []
+    logger.info(f"Starting evaluation {run_id} on {len(inputs)} inputs...")
 
     results: List[Dict[str, Any]] = []
     timings: List[float] = []
 
-    for idx, ticket in enumerate(raw_tickets, 1):
-        logger.info(f"Ticket {idx}/{len(raw_tickets)}: Processing ticket {ticket.ticket_id}")
+    for idx, item in enumerate(inputs, 1):
+        ticket = None
         t0 = time.perf_counter()
         try:
+            ticket = ingest_ticket(item)
+            logger.info("Ticket %s/%s: Processing ticket %s", idx, len(inputs), ticket.ticket_id)
             final_state = process_ticket(
                 ticket,
                 db_path=db_path,
                 use_llm=use_llm,
+                run_id=run_id,
+                input_index=idx,
             )
             elapsed = time.perf_counter() - t0
             timings.append(elapsed)
             results.append(final_state)
-            if idx % 10 == 0 or idx == len(raw_tickets):
-                logger.info(f"Progress: [{idx}/{len(raw_tickets)}] tickets processed (last: {elapsed:.2f}s).")
+            if idx % 10 == 0 or idx == len(inputs):
+                logger.info(f"Progress: [{idx}/{len(inputs)}] tickets processed (last: {elapsed:.2f}s).")
         except Exception as e:
             elapsed = time.perf_counter() - t0
             timings.append(elapsed)
-            logger.error(f"Error processing ticket {ticket.ticket_id}: {e}")
-            results.append({
-                "ticket_id": ticket.ticket_id,
+            supplied_id = item.get("ticket_id") if isinstance(item, dict) else None
+            ticket_id = ticket.ticket_id if ticket else (supplied_id if isinstance(supplied_id, str) and supplied_id.strip() else f"INVALID-{run_id}-{idx}")
+            reason = "invalid_input" if ticket is None else "processing_exception"
+            error_type = type(e).__name__
+            logger.error("Input %s: %s (%s)", idx, reason, error_type)
+            failure = {
+                "ticket_id": ticket_id,
+                "run_id": run_id,
+                "input_index": idx,
                 "route": "escalate",
-                "escalation_reason": "evaluation_exception",
-                "error": str(e),
-            })
+                "escalation_reason": reason,
+                "error": error_type,
+                "guardrail_passed": False,
+                "logged_to_audit_store": False,
+                "escalation_packet": {"ticket_id": ticket_id, "run_id": run_id, "input_index": idx,
+                    "handover_notes": f"Human review required: {reason} ({error_type}). Locate the original input using the run and input index."},
+            }
+            try:
+                failure["decision_id"] = log_decision(DecisionRecord(
+                    ticket_id=ticket_id, run_id=run_id, input_index=idx,
+                    stage="ingestion" if ticket is None else "triage",
+                    action_taken="escalate", reason=f"{reason}: {error_type}",
+                    guardrail_results={"pii": "not_run", "grounding": "not_run", "citation": "not_run"},
+                ), db_path=db_path)
+                failure["logged_to_audit_store"] = True
+            except Exception as audit_error:
+                failure["audit_error"] = type(audit_error).__name__
+                logger.error("Could not persist failure for input %s (%s)", idx, type(audit_error).__name__)
+            results.append(failure)
+        raw_tickets.append(ticket)
 
     # Coverage reconciliation check against SQLite audit store
-    ticket_ids = [t.ticket_id for t in raw_tickets]
-    reconciliation = reconcile_decisions_with_tickets(ticket_ids, db_path=db_path)
+    ticket_ids = [r["ticket_id"] for r in results]
+    try:
+        reconciliation = reconcile_decisions_with_tickets(ticket_ids, db_path=db_path, run_id=run_id)
+    except Exception as audit_error:
+        reconciliation = {"run_id": run_id, "is_reconciled": False,
+            "processed_ticket_count": len(inputs), "logged_ticket_count": None,
+            "coverage_pct": 0.0, "audit_error": type(audit_error).__name__,
+            "missing_ticket_ids": [], "extra_ticket_ids": [], "verification_status": "unavailable"}
     logger.info(f"Decision Audit Reconciliation: {reconciliation['is_reconciled']} ({reconciliation['logged_ticket_count']}/{reconciliation['processed_ticket_count']} logged)")
 
     # Build detailed per-ticket execution records
     ticket_records: List[Dict[str, Any]] = []
     for norm, res, elapsed in zip(raw_tickets, results, timings):
-        labels = norm.labels
+        labels = norm.labels if norm else None
         labels_dict = None
         if labels:
             labels_dict = {
@@ -681,21 +557,39 @@ def run_evaluation(
                 "urgency": labels.urgency,
                 "expected_route": labels.expected_route,
                 "expected_doc_ids": labels.expected_doc_ids or [],
+                "must_not_auto_respond": labels.must_not_auto_respond,
+                "answerable_from_docs": labels.answerable_from_docs,
             }
 
-        retrieved_doc_ids = [p.get("doc_id") for p in res.get("retrieved_passages", []) if p.get("doc_id")]
-        cited_doc_ids = res.get("cited_doc_ids", [])
+        retrieved_passages = res.get("retrieved_passages", [])
+        retrieved_doc_ids = [p.get("doc_id") for p in retrieved_passages if p.get("doc_id")]
+        retrieved_docs_with_scores = [
+            {"doc_id": p.get("doc_id"), "score": p.get("score"), "title": p.get("title", "")}
+            for p in retrieved_passages if p.get("doc_id")
+        ]
+        cited_doc_ids = re.findall(r"\[(DOC-[A-Za-z0-9_-]+)\]", res.get("generated_response") or "")
         valid_citations = [c for c in cited_doc_ids if c in retrieved_doc_ids]
+        expected_docs_set = set(labels.expected_doc_ids) if (labels and labels.expected_doc_ids) else set()
+
+        reference_doc_mismatch = None
+        route_decision = res.get("route")
+        if route_decision == "auto_respond" and res.get("generated_response"):
+            if expected_docs_set:
+                reference_doc_mismatch = not bool(set(cited_doc_ids) & expected_docs_set)
 
         rec = {
-            "ticket_id": norm.ticket_id,
-            "customer_id": norm.customer_id,
-            "customer_tier": norm.customer_tier,
-            "language_fluency": norm.language_fluency,
-            "channel": str(norm.channel.value) if hasattr(norm.channel, "value") else str(norm.channel),
-            "subject": norm.subject,
-            "body": norm.body,
-            "clean_text": res.get("clean_text") or (f"{norm.subject} {norm.body}".strip()),
+            "ticket_id": res["ticket_id"],
+            "run_id": run_id,
+            "input_index": len(ticket_records) + 1,
+            "input_valid": norm is not None,
+            "customer_id": norm.customer_id if norm else None,
+            "customer_tier": norm.customer_tier if norm else None,
+            "customer_region": norm.customer_region if norm else None,
+            "language_fluency": norm.language_fluency if norm else None,
+            "channel": norm.channel.value if norm else None,
+            "subject": norm.subject if norm else None,
+            "body": norm.body if norm else None,
+            "clean_text": res.get("clean_text") or (f"{norm.subject} {norm.body}".strip() if norm else None),
             "ground_truth_labels": labels_dict,
             "execution": {
                 "latency_seconds": round(elapsed, 3),
@@ -710,16 +604,24 @@ def run_evaluation(
                 "routing_rule_matched": (", ".join(res.get("policy_flags", [])) if res.get("policy_flags") else None) or res.get("routing_rule_matched"),
                 "escalation_reason": res.get("escalation_reason"),
                 "escalation_packet": res.get("escalation_packet"),
-                "retrieved_passages_count": len(res.get("retrieved_passages", [])),
+                "retrieved_passages_count": len(retrieved_passages),
                 "retrieved_doc_ids": retrieved_doc_ids,
+                "retrieved_docs_with_scores": retrieved_docs_with_scores,
                 "cited_doc_ids": cited_doc_ids,
                 "valid_citations": valid_citations,
-                "citations_accurate": (len(valid_citations) == len(cited_doc_ids)) if cited_doc_ids else True,
+                "citation_ids_valid": (len(valid_citations) == len(cited_doc_ids)) if cited_doc_ids else None,
+                "citations_accurate": None,
+                "is_hallucinated": None,
+                "reference_doc_mismatch": reference_doc_mismatch,
                 "generated_response": res.get("generated_response"),
-                "guardrail_passed": res.get("guardrail_passed", True),
+                "guardrail_passed": res.get("guardrail_passed"),
+                "guardrail_results": res.get("guardrail_results", {}),
                 "guardrail_block_reason": res.get("guardrail_block_reason"),
+                "grounding_review": res.get("grounding_review", {}),
                 "final_response_text": res.get("final_response_text") or res.get("generated_response"),
-                "logged_to_audit_store": res.get("logged_to_audit_store", True),
+                "logged_to_audit_store": res.get("logged_to_audit_store", False),
+                "decision_id": res.get("decision_id"),
+                "audit_error": res.get("audit_error"),
                 "error": res.get("error"),
             }
         }
@@ -728,6 +630,24 @@ def run_evaluation(
     # Compute metrics
     metrics = compute_metrics(results, raw_tickets, timings, reconciliation=reconciliation)
     metrics["reconciliation_check"] = reconciliation
+    metrics["run_id"] = run_id
+    metrics["dataset"] = str(Path(input_path).resolve())
+    metrics["dataset_sha256"] = hashlib.sha256(source_bytes).hexdigest()
+    metrics["started_at"] = started_at
+    metrics["completed_at"] = datetime.now(timezone.utc).isoformat()
+    metrics["execution_mode"] = "llm_enabled" if use_llm else "offline"
+    metrics["configuration"] = {key: os.getenv(key, default) for key, default in {
+        "MODEL_NAME": "meta-llama/llama-3.1-8b-instruct", "EMBEDDING_MODEL": "all-MiniLM-L6-v2",
+        "CONFIDENCE_THRESHOLD": "0.80", "RETRIEVAL_SIMILARITY_THRESHOLD": "0.40",
+        "RETRIEVAL_TOP_K": "3", "GUARDRAIL_CONFIDENCE_THRESHOLD": "0.70",
+        "KILL_SWITCH_ACTIVE": "false"}.items()}
+    metrics["source_sha256"] = {str(path.relative_to(PROJECT_ROOT)).replace("\\", "/"):
+        hashlib.sha256(path.read_bytes()).hexdigest()
+        for pattern in ("src/*.py", "evaluation/*.py", "prompts/build/*.txt")
+        for path in sorted(PROJECT_ROOT.glob(pattern))}
+    metrics["run_status"] = "completed" if reconciliation["is_reconciled"] else "audit_incomplete"
+    metrics["invalid_input_count"] = sum(t is None for t in raw_tickets)
+    metrics["processing_error_count"] = sum(t is not None and bool(r.get("error")) for t, r in zip(raw_tickets, results))
     metrics["contract_kpis"] = evaluate_contract_kpis(metrics)
 
     # Save output report FIRST
@@ -739,16 +659,13 @@ def run_evaluation(
             json.dump(metrics, f, indent=2)
         logger.info(f"Evaluation report successfully saved to: {out_file}")
 
-        # Always maintain canonical evaluation/results/latest_report.json
-        canonical_json = Path("evaluation/results/latest_report.json").resolve()
-        if out_file != canonical_json:
-            canonical_json.parent.mkdir(parents=True, exist_ok=True)
-            with open(canonical_json, "w", encoding="utf-8") as f:
-                json.dump(metrics, f, indent=2)
-            logger.info(f"Updated canonical report: {canonical_json}")
-
     # Save per-ticket execution results JSON (File 2)
     ticket_payload = {
+        "metrics_schema_version": metrics["metrics_schema_version"],
+        "run_id": run_id,
+        "dataset_sha256": metrics["dataset_sha256"],
+        "execution_mode": metrics["execution_mode"],
+        "run_status": metrics["run_status"],
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "dataset": input_path,
         "total_tickets": len(ticket_records),
@@ -757,7 +674,9 @@ def run_evaluation(
         "tickets": ticket_records,
     }
 
-    if output_path:
+    if ticket_output_path:
+        canonical_tickets_json = Path(ticket_output_path).resolve()
+    elif output_path:
         out_dir = Path(output_path).resolve().parent
         canonical_tickets_json = out_dir / "latest_ticket_results.json"
     else:
@@ -788,13 +707,13 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="evaluation/results/latest_report.json",
-        help="Path to save evaluation metrics report JSON (defaults to evaluation/results/latest_report.json)"
+        default="evaluation/results",
+        help="Output directory (writes latest_report.json and latest_ticket_results.json), or an explicit metrics .json path"
     )
     parser.add_argument(
         "--ticket-output",
         type=str,
-        default="evaluation/results/latest_ticket_results.json",
+        default=None,
         help="Path to save detailed per-ticket execution results JSON"
     )
     parser.add_argument(
@@ -811,12 +730,15 @@ def main():
 
     args = parser.parse_args()
 
-    run_evaluation(
+    metrics = run_evaluation(
         input_path=args.input,
         output_path=args.output,
         limit=args.limit,
         use_llm=not args.offline,
+        ticket_output_path=args.ticket_output,
     )
+    if not metrics["reconciliation_check"]["is_reconciled"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

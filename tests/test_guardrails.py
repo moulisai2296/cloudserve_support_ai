@@ -12,6 +12,7 @@ from src.guardrails import (
     check_instruction_integrity,
     check_unauthorized_commitments,
     check_grounding_and_citations,
+    check_citations,
     validate_response,
     guardrails_node,
 )
@@ -58,19 +59,19 @@ def test_grounding_and_citation_validation():
 
     # 1. Valid citation
     good_text = "Please follow the resolution in [DOC-AUTH-002]."
-    ok, errs = check_grounding_and_citations(good_text, passages)
+    ok, errs = check_citations(good_text, passages)
     assert ok
     assert len(errs) == 0
 
     # 2. Invented citation (DOC-FAKE-999 is not in passages)
     bad_text = "Refer to [DOC-FAKE-999] for details."
-    ok, errs = check_grounding_and_citations(bad_text, passages)
+    ok, errs = check_citations(bad_text, passages)
     assert not ok
     assert any("Invented citation" in e for e in errs)
 
     # 3. Missing any citation
     no_cite_text = "Just restart your computer and try again."
-    ok, errs = check_grounding_and_citations(no_cite_text, passages)
+    ok, errs = check_citations(no_cite_text, passages)
     assert not ok
     assert any("no verifiable" in e for e in errs)
 
@@ -96,12 +97,15 @@ def test_guardrails_node_block_and_escalate():
 
 def test_guardrails_node_clean_pass():
     """Valid grounded response passes without alteration."""
+    from src.grounding import render_source_excerpt
+    passages = [{"doc_id": "DOC-AUTH-002", "title": "MFA",
+                 "content": "Check your device clock synchronisation."}]
     state = {
         "ticket_id": "T-GUARD-02",
         "route": "auto_respond",
         "clean_text": "How do I fix MFA?",
-        "generated_response": "Please check your device clock synchronisation as explained in [DOC-AUTH-002].",
-        "retrieved_passages": [{"doc_id": "DOC-AUTH-002", "title": "MFA"}],
+        "generated_response": render_source_excerpt(passages),
+        "retrieved_passages": passages,
         "generation_confidence": 0.92,
     }
 

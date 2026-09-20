@@ -12,6 +12,7 @@ import logging
 import os
 import sqlite3
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -32,6 +33,8 @@ class DecisionRecord(BaseModel):
     decision_id: str = Field(default_factory=lambda: f"DEC-{uuid.uuid4().hex[:10].upper()}")
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     ticket_id: str
+    run_id: Optional[str] = None
+    input_index: Optional[int] = None
     stage: str = "triage"  # classification | routing | generation | validation | triage
     input_summary: str = ""
     model: Dict[str, str] = Field(default_factory=lambda: {
@@ -51,6 +54,7 @@ class DecisionRecord(BaseModel):
     })
     prompt_version: str = "PR-01/PR-02 v1.0"
     requirement_ids: List[str] = Field(default_factory=lambda: ["FR-02", "FR-04", "FR-08"])
+    grounding_review: Dict[str, Any] = Field(default_factory=dict)
 
 
 def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
@@ -92,6 +96,12 @@ def init_db(db_path: Optional[str] = None) -> None:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_ticket ON decisions(ticket_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_action ON decisions(action_taken);")
+        # Additive migration preserves historical decisions, which have no run identity.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(decisions)")}
+        for name, sql_type in (("run_id", "TEXT"), ("input_index", "INTEGER")):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE decisions ADD COLUMN {name} {sql_type}")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_run ON decisions(run_id, input_index)")
     conn.close()
 
 
@@ -117,7 +127,7 @@ def log_decision(record: DecisionRecord | Dict[str, Any], db_path: Optional[str]
 
     with conn:
         conn.execute("""
-            INSERT OR REPLACE INTO decisions (
+            INSERT INTO decisions (
                 decision_id,
                 ticket_id,
                 timestamp,
@@ -132,8 +142,8 @@ def log_decision(record: DecisionRecord | Dict[str, Any], db_path: Optional[str]
                 model_name,
                 prompt_version,
                 requirement_ids,
-                full_record
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                full_record, run_id, input_index
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             parsed.decision_id,
             parsed.ticket_id,
@@ -150,6 +160,8 @@ def log_decision(record: DecisionRecord | Dict[str, Any], db_path: Optional[str]
             parsed.prompt_version,
             reqs_json,
             full_json,
+            parsed.run_id,
+            parsed.input_index,
         ))
     conn.close()
     return parsed.decision_id
@@ -190,7 +202,8 @@ def count_decisions(db_path: Optional[str] = None) -> int:
 
 def reconcile_decisions_with_tickets(
     processed_ticket_ids: List[str],
-    db_path: Optional[str] = None
+    db_path: Optional[str] = None,
+    run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Performs coverage check comparing processed tickets against logged decisions.
@@ -199,22 +212,31 @@ def reconcile_decisions_with_tickets(
     init_db(db_path)
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT ticket_id FROM decisions")
-    logged_ids = {r["ticket_id"] for r in cursor.fetchall()}
+    if run_id is not None:
+        cursor.execute("SELECT ticket_id, input_index FROM decisions WHERE run_id = ?", (run_id,))
+    else:
+        cursor.execute("SELECT ticket_id, input_index FROM decisions")
+    rows = cursor.fetchall()
     conn.close()
-
-    expected_set = set(processed_ticket_ids)
-    missing = expected_set - logged_ids
-    extras = logged_ids - expected_set
-
-    is_exact_match = (len(missing) == 0)
-
+    # A repeated ticket ID is a separate input occurrence, identified by its index.
+    expected = Counter(enumerate(processed_ticket_ids, 1)) if run_id is not None else Counter(processed_ticket_ids)
+    actual = Counter((r["input_index"], r["ticket_id"]) for r in rows) if run_id is not None else Counter(r["ticket_id"] for r in rows)
+    missing = list((expected - actual).elements())
+    extras = list((actual - expected).elements())
+    matched = sum((expected & actual).values())
+    total = len(processed_ticket_ids)
+    ticket_ids = lambda entries: [entry[1] if run_id is not None else entry for entry in entries]
     return {
-        "is_reconciled": is_exact_match,
-        "processed_ticket_count": len(processed_ticket_ids),
-        "logged_ticket_count": len(logged_ids),
-        "missing_ticket_ids": sorted(list(missing)),
-        "extra_ticket_ids": sorted(list(extras)),
+        "run_id": run_id,
+        "is_reconciled": not missing and not extras,
+        "processed_ticket_count": total,
+        "logged_ticket_count": len(rows),
+        "matched_record_count": matched,
+        "coverage_pct": round(100.0 * matched / total, 2) if total else 0.0,
+        "missing_ticket_ids": ticket_ids(missing),
+        "extra_ticket_ids": ticket_ids(extras),
+        "missing_input_indices": [entry[0] for entry in missing] if run_id is not None else [],
+        "extra_input_indices": [entry[0] for entry in extras] if run_id is not None else [],
     }
 
 
@@ -250,6 +272,8 @@ def log_decision_node(state: Dict[str, Any], db_path: Optional[str] = None) -> D
 
     record = DecisionRecord(
         ticket_id=ticket_id,
+        run_id=state.get("run_id"),
+        input_index=state.get("input_index"),
         stage="triage",
         input_summary=(state.get("clean_text") or state.get("body", ""))[:250],
         prediction={
@@ -263,10 +287,11 @@ def log_decision_node(state: Dict[str, Any], db_path: Optional[str] = None) -> D
         action_taken=action,
         reason=reason,
         guardrail_results=state.get("guardrail_results", {
-            "pii": "pass",
-            "grounding": "pass",
-            "citation": "pass"
+            "pii": "not_run",
+            "grounding": "not_run",
+            "citation": "not_run"
         }),
+        grounding_review=state.get("grounding_review", {}),
     )
 
     decision_id = log_decision(record, db_path=db_path)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
@@ -25,8 +26,45 @@ DEFAULT_CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.80"))
 HIGH_RISK_INTENTS = {
     "security_incident",
     "compliance_request",
-    "data_residency",
+    "data_residency"
 }
+
+# Conservative operational exclusions from the discovery/PRD. These inspect
+# customer text, not evaluation labels, and also cover mixed-intent tickets
+# whose primary classification may be routine. Regex rules are not exhaustive
+# semantic risk detection; ambiguous cases still rely on the confidence gate.
+CONTENT_POLICY_RULES = {
+    "POLICY_SECURITY_EXPOSURE": re.compile(
+        r"\b(?:compromis\w*|breach\w*|account takeover|unauthori[sz]ed access|"
+        r"suspicious (?:login|activity)|former employee.{0,60}still.{0,20}access)\b|"
+        r"\b(?:exposed|leaked|stolen)\b.{0,60}\b(?:key|keys|secret|secrets|credentials?|tokens?|passwords?)\b|"
+        r"\b(?:key|keys|secret|secrets|credentials?|tokens?|passwords?)\b.{0,60}\b(?:exposed|leaked|stolen|public)\b",
+        re.IGNORECASE,
+    ),
+    "POLICY_FINANCIAL_DISPUTE": re.compile(
+        r"\b(?:refund\w*|chargebacks?|billing dispute|disput\w*\b.{0,30}\b(?:charge|invoice|payment)s?|"
+        r"(?:charge|invoice|payment)s? .{0,30}disput\w*|charged (?:twice|incorrectly)|"
+        r"duplicate charge|unauthori[sz]ed (?:charge|payment))\b",
+        re.IGNORECASE,
+    ),
+    "POLICY_ACCOUNT_OR_DATA_DELETION": re.compile(
+        r"\b(?:delet\w*|eras\w*|clos\w*)\b.{0,40}\b(?:account|organisation|organization|customer data|personal data|all (?:our|my) data)\b|"
+        r"\b(?:account|personal data)\b.{0,30}\b(?:deletion|erasure|closure)\b",
+        re.IGNORECASE,
+    ),
+    "POLICY_LEGAL_OR_COMPLIANCE": re.compile(
+        r"\b(?:gdpr|hipaa|soc ?2|compliance|auditor|legal dispute|lawsuit|"
+        r"custom contract|contract terms|data residency|data locality)\b|"
+        r"\bdata\b.{0,40}\b(?:stay|remain|stored|reside)\b.{0,30}\b(?:eu|europe|region)\b",
+        re.IGNORECASE,
+    ),
+}
+
+
+def content_policy_flags(ticket_text: str) -> List[str]:
+    """Return explainable exclusions derived only from the submitted text."""
+    text = " ".join(ticket_text.split())
+    return [flag for flag, pattern in CONTENT_POLICY_RULES.items() if pattern.search(text)]
 
 
 class RouteDecision(str, Enum):
@@ -97,7 +135,7 @@ def build_escalation_packet(
     elif escalation_reason == EscalationReason.HIGH_RISK_INTENT.value:
         notes = f"High-risk intent detected ('{intent}'). Policy strictly prohibits automated response."
     elif escalation_reason == EscalationReason.HIGH_RISK_POLICY.value:
-        notes = "Ticket flagged by policy exclusion rules (must_not_auto_respond). Requires manual action."
+        notes = f"Human review required by operational policy: {', '.join(policy_flags)}."
     elif escalation_reason == EscalationReason.ENTERPRISE_HIGH_URGENCY.value:
         notes = "Enterprise customer reporting high-urgency issue. Fast-tracked to senior engineer for SLA compliance."
     elif escalation_reason == EscalationReason.LOW_CONFIDENCE.value:
@@ -141,10 +179,13 @@ def route_ticket(
     retrieved_passages: Optional[List[Dict[str, Any]]] = None,
     customer_context: Optional[Dict[str, Any]] = None,
     classification_reasoning: Optional[str] = None,
+    ticket_text: str = "",
 ) -> RoutingResult:
     """
     Evaluates ticket attributes against policy rules to determine target route.
     If escalated, automatically compiles a rich contextual escalation packet.
+    must_not_auto_respond is an explicit trusted caller override, never a
+    dataset label. API and batch graph calls derive exclusions from ticket_text.
     """
     active_threshold = threshold if threshold is not None else DEFAULT_CONFIDENCE_THRESHOLD
     is_kill_switch = (
@@ -194,9 +235,13 @@ def route_ticket(
             escalation_packet=packet,
         )
 
-    # Rule 3: Explicit policy exclusion flag (e.g. data export / deletion / refund dispute)
+    # Rule 3: Observable policy exclusions and optional trusted caller override.
+    policy_flags.extend(content_policy_flags(ticket_text))
+    if intent == "feature_request":
+        policy_flags.append("POLICY_FEATURE_REQUEST_REQUIRES_HUMAN")
     if must_not_auto_respond:
-        policy_flags.append("MUST_NOT_AUTO_RESPOND_FLAG")
+        policy_flags.append("TRUSTED_MANUAL_REVIEW_OVERRIDE")
+    if policy_flags:
         packet = _create_packet(EscalationReason.HIGH_RISK_POLICY.value)
         return RoutingResult(
             route=RouteDecision.ESCALATE,
@@ -288,10 +333,6 @@ def route_node(state: Dict[str, Any]) -> Dict[str, Any]:
     metadata = state.get("metadata", {})
     customer_tier = metadata.get("customer_tier") or state.get("customer_tier", "standard")
 
-    # Check ground-truth or ingested policy labels
-    labels = state.get("labels", {})
-    must_not_auto_respond = labels.get("must_not_auto_respond", False) if isinstance(labels, dict) else False
-
     kill_switch = state.get("kill_switch")
     threshold = state.get("routing_threshold")
 
@@ -309,7 +350,7 @@ def route_node(state: Dict[str, Any]) -> Dict[str, Any]:
         confidence=confidence,
         has_relevant_docs=has_relevant_docs,
         customer_tier=customer_tier,
-        must_not_auto_respond=must_not_auto_respond,
+        ticket_text=f"{state.get('subject', '')}\n{state.get('body', '')}",
         kill_switch=kill_switch,
         threshold=threshold,
         ticket_id=ticket_id,

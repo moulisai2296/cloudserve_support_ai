@@ -22,6 +22,8 @@ class SupportState(TypedDict, total=False):
     """
     # Ticket Ingestion & Metadata
     ticket_id: str
+    run_id: Optional[str]
+    input_index: Optional[int]
     channel: str
     subject: str
     body: str
@@ -32,8 +34,6 @@ class SupportState(TypedDict, total=False):
     customer_region: str
     language_fluency: str
     metadata: Dict[str, Any]
-    labels: Dict[str, Any]
-    history: Dict[str, Any]
 
     # Retrieval
     chroma_path: str
@@ -75,6 +75,7 @@ class SupportState(TypedDict, total=False):
     guardrail_blocked: bool
     guardrail_block_reason: Optional[str]
     guardrail_results: Dict[str, str]
+    grounding_review: Dict[str, Any]
 
     # Governance & Audit Store
     db_path: str
@@ -164,6 +165,8 @@ def process_ticket(
     use_llm: bool = True,
     model_name: Optional[str] = None,
     chroma_path: Optional[str] = None,
+    run_id: Optional[str] = None,
+    input_index: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Convenience function: Normalizes raw input, builds initial state,
@@ -178,6 +181,8 @@ def process_ticket(
 
     initial_state: SupportState = {
         "ticket_id": norm.ticket_id,
+        "run_id": run_id,
+        "input_index": input_index,
         "channel": norm.channel.value,
         "subject": norm.subject,
         "body": norm.body,
@@ -187,9 +192,17 @@ def process_ticket(
         "customer_tier": norm.customer_tier,
         "customer_region": norm.customer_region,
         "language_fluency": norm.language_fluency,
-        "metadata": norm.metadata,
-        "labels": norm.labels.model_dump() if norm.labels else {},
-        "history": norm.history.model_dump() if norm.history else {},
+        # Only operational fields enter the graph. Labels and historical outcomes
+        # remain on the evaluator's NormalizedTicket for scoring, never inference.
+        "metadata": {
+            "ticket_id": norm.ticket_id,
+            "channel": norm.channel.value,
+            "customer_id": norm.customer_id,
+            "customer_name": norm.customer_name,
+            "customer_tier": norm.customer_tier,
+            "customer_region": norm.customer_region,
+            "language_fluency": norm.language_fluency,
+        },
         "generated_response": None,
         "cited_doc_ids": [],
         "use_llm_classification": use_llm,
