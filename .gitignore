@@ -24,3 +24,5 @@ htmlcov/
 .DS_Store
 Thumbs.db
 docs1
+scripts
+outputs
