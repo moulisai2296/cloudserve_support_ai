@@ -2,19 +2,27 @@
 
 An FDE capstone for ticket triage, documentation retrieval, cited response drafting, human escalation, and decision auditing.
 
-## 1. Execute the project and evaluation harness
+## 1. Create the environment and run the evaluation harness
 
-Run all commands from the repository root. Install **Python 3.14** and **uv** first; these match the project's lockfile and CI configuration.
+Run these commands from the repository root with **uv** installed.
 
-### Step 1 — Install dependencies
+### Step 1 - Create the virtual environment
 
 ```powershell
-uv sync --frozen --python 3.14
+uv venv --python 3.14
 ```
 
-The commands below use `uv run`, so activating the virtual environment is optional.
+This creates the project's `.venv` environment.
 
-### Step 2 — Configure the environment
+### Step 2 - Install packages
+
+```powershell
+uv sync
+```
+
+The commands below use `uv run`, which uses the project environment without requiring manual activation.
+
+### Step 3 - Configure model access
 
 Create `.env` from the template, preserving any existing configuration:
 
@@ -30,7 +38,7 @@ Edit `.env` privately. Set `OPENROUTER_API_KEY` for model-backed execution. For 
 
 OpenRouter is the implemented provider. Offline execution uses heuristic classification and extractive generation. Initial dependency and embedding-model downloads can still require internet access.
 
-### Step 3 — Build the documentation index
+### Step 4 - Build the documentation index
 
 ```powershell
 uv run python -m src.retrieve --index
@@ -42,30 +50,7 @@ This indexes the 29 articles in `data/documentation.json` into Chroma. A populat
 uv run python -m src.retrieve --rebuild
 ```
 
-### Step 4 — Start the application
-
-```powershell
-uv run uvicorn src.api:app --host 127.0.0.1 --port 8000
-```
-
-Open **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)** and submit a ticket through `POST /tickets`. Keep this terminal running and use another terminal for evaluation.
-
-Example offline request:
-
-```json
-{
-  "ticket_id": "DEMO-001",
-  "channel": "email",
-  "subject": "Help setting up MFA",
-  "body": "How do I enable multi-factor authentication for my account?",
-  "customer_tier": "standard",
-  "use_llm": false
-}
-```
-
-Set `use_llm` to `true` for model-backed processing after configuring the key. Inspect the actual route, draft or escalation packet, citations, and decision ID.
-
-### Step 5 — Run the evaluation harness
+### Step 5 - Run the evaluation harness
 
 The harness runs independently; the API server does not need to be running.
 
@@ -117,7 +102,7 @@ uv run python -m evaluation.harness --input data/development_tickets.json --offl
 
 The console prints each ticket starting, progress, four report sections, and seven KPI comparisons. Incomplete audit reconciliation causes a non-zero exit status. A zero exit status does not certify that every KPI or acceptance requirement passed.
 
-### Step 6 — Run tests
+### Step 6 - Run tests
 
 ```powershell
 uv run pytest tests/ -v
@@ -222,7 +207,34 @@ These operational comparisons have explicit limits:
 
 Detailed JSON retains class and urgency metrics, route disagreements, calibration and group diagnostics, configuration, source/dataset hashes, and reconciliation. Outcomes lacking supporting evidence remain separate from the selected operational scorecard.
 
-## 6. API endpoints
+## 6. Run FastAPI
+
+FastAPI is a separate way to process individual tickets. It is not required to run the evaluation harness. Complete the environment setup and indexing in section 1 first.
+
+### Start the service
+
+```powershell
+uv run uvicorn src.api:app --host 127.0.0.1 --port 8000
+```
+
+Open **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)** and submit a ticket through `POST /tickets`. Keep this terminal running while using the API.
+
+Example offline request:
+
+```json
+{
+  "ticket_id": "DEMO-001",
+  "channel": "email",
+  "subject": "Help setting up MFA",
+  "body": "How do I enable multi-factor authentication for my account?",
+  "customer_tier": "standard",
+  "use_llm": false
+}
+```
+
+Set `use_llm` to `true` for model-backed processing after configuring the key. Inspect the actual route, draft or escalation packet, citations, and decision ID.
+
+### API endpoints
 
 | Endpoint | Behaviour |
 | --- | --- |
@@ -261,8 +273,9 @@ requirements.txt      Pinned dependency list
 
 ## 8. Deliverables
 
-- **Project report:** [Markdown](docs/report.md) · [PDF](docs/report.pdf).
-- **Video script:** [Markdown](docs/video_script.md) · [PDF](docs/video_script.pdf).
+- **Project report:** [PDF](docs/report.pdf).
+- **Presentation:** [PowerPoint](docs/CloudServe_Capstone_Presentation.pptx).
+- **Speaking script:** [Slide-by-slide notes](docs/presentation_speaker_notes.md).
 - **Architecture:** [Interactive HTML](docs/architecture_diagram.html).
 - **Stage workbooks and effort log:** Word documents in `docs/`.
 - **Prompt register:** [prompts/README.md](prompts/README.md).
@@ -277,7 +290,7 @@ The report identifies its evidence run and remaining work. The architecture's ro
 | Provider-backed run falls back | Configured key and provider/parsing failures |
 | Results differ from an earlier run | Dataset size, mode, effective settings, model, source/prompt hashes, and index |
 | First retrieval is slow or fails | Embedding download, index build, and storage access |
-| No server after invoking the API module | Use the Uvicorn command in section 1 |
+| No server after invoking the API module | Use the Uvicorn command in section 6 |
 | Earlier results disappear | Directory output replaces fixed filenames; use separate directories |
 | Audit reconciliation fails | Missing/extra positions and database write failures |
 
